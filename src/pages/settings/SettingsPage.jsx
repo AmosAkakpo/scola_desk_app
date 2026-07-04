@@ -8,23 +8,46 @@ export default function SettingsPage() {
   const [congCfg, setCongCfg] = useState({ avg_floor: 10, felicitation_percentile: 20, tableau_top_n: 5 })
   const [conseilRanges, setConseilRanges] = useState([])
   const [defaultConduite, setDefaultConduite] = useState(18)
+  const [passageCutoff, setPassageCutoff] = useState(10)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState({})
   const [msg, setMsg] = useState('')
+  const [confirm, setConfirm] = useState({ show: false, label: '', onConfirm: null, onCancel: null })
+  // Snapshots of last-saved values — used to detect changes and to revert on Annuler
+  const [origScale, setOrigScale] = useState([])
+  const [origSections, setOrigSections] = useState([])
+  const [origConduite, setOrigConduite] = useState(18)
+  const [origPassage, setOrigPassage] = useState(10)
+  const [origCongCfg, setOrigCongCfg] = useState({ avg_floor: 10, felicitation_percentile: 20, tableau_top_n: 5 })
+  const [origConseilRanges, setOrigConseilRanges] = useState([])
 
   useEffect(() => {
     api.get('/api/settings').then(res => {
-      setScale(res.data.appreciation_scale || [])
-      setSections(res.data.school_sections || [])
+      const scaleVal = res.data.appreciation_scale || []
+      const sectionsVal = res.data.school_sections || []
+      const conduiteVal = res.data.default_conduite_score ?? 18
+      const passageVal = res.data.passage_cutoff ?? 10
+      const congVal = res.data.congratulations_config || { avg_floor: 10, felicitation_percentile: 20, tableau_top_n: 5 }
+      const conseilVal = res.data.conseil_decision_ranges || []
+      setScale(scaleVal); setOrigScale(JSON.parse(JSON.stringify(scaleVal)))
+      setSections(sectionsVal); setOrigSections(JSON.parse(JSON.stringify(sectionsVal)))
       setLogo(res.data.school_logo_path)
-      setCongCfg(res.data.congratulations_config || { avg_floor: 10, felicitation_percentile: 20, tableau_top_n: 5 })
-      setConseilRanges(res.data.conseil_decision_ranges || [])
-      setDefaultConduite(res.data.default_conduite_score ?? 18)
+      setCongCfg(congVal); setOrigCongCfg(JSON.parse(JSON.stringify(congVal)))
+      setConseilRanges(conseilVal); setOrigConseilRanges(JSON.parse(JSON.stringify(conseilVal)))
+      setDefaultConduite(conduiteVal); setOrigConduite(conduiteVal)
+      setPassageCutoff(passageVal); setOrigPassage(passageVal)
       setLoading(false)
     })
   }, [])
 
   function showMsg(text) { setMsg(text); setTimeout(() => setMsg(''), 2000) }
+
+  function askConfirm(label, hasChanged, fn, revertFn) {
+    if (!hasChanged) { showMsg('Aucune modification à enregistrer'); return }
+    setConfirm({ show: true, label, onConfirm: fn, onCancel: revertFn })
+  }
+  function closeConfirm() { setConfirm({ show: false, label: '', onConfirm: null, onCancel: null }) }
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
   // ─── Logo ──────────────────────────────────────────────────
   async function uploadLogo(file) {
@@ -58,6 +81,7 @@ export default function SettingsPage() {
   async function saveScale() {
     setSaving(p => ({ ...p, scale: true }))
     await api.put('/api/settings/appreciation-scale', { scale })
+    setOrigScale(JSON.parse(JSON.stringify(scale)))
     setSaving(p => ({ ...p, scale: false }))
     showMsg('Barème enregistré')
   }
@@ -78,6 +102,7 @@ export default function SettingsPage() {
   async function saveSections() {
     setSaving(p => ({ ...p, sections: true }))
     await api.put('/api/settings/school-sections', { sections })
+    setOrigSections(JSON.parse(JSON.stringify(sections)))
     setSaving(p => ({ ...p, sections: false }))
     showMsg('Sections enregistrées')
   }
@@ -86,14 +111,25 @@ export default function SettingsPage() {
   async function saveDefaultConduite() {
     setSaving(p => ({ ...p, conduite: true }))
     await api.put('/api/settings/default-conduite', { score: defaultConduite })
+    setOrigConduite(defaultConduite)
     setSaving(p => ({ ...p, conduite: false }))
     showMsg('Conduite par défaut enregistrée')
+  }
+
+  // ─── Passage Cutoff ───────────────────────────────────────
+  async function savePassageCutoff() {
+    setSaving(p => ({ ...p, passage: true }))
+    await api.put('/api/settings/passage-cutoff', { cutoff: passageCutoff })
+    setOrigPassage(passageCutoff)
+    setSaving(p => ({ ...p, passage: false }))
+    showMsg('Seuil de passage enregistré')
   }
 
   // ─── Congratulations Config ────────────────────────────────
   async function saveCongCfg() {
     setSaving(p => ({ ...p, cong: true }))
     await api.put('/api/settings/congratulations-config', congCfg)
+    setOrigCongCfg(JSON.parse(JSON.stringify(congCfg)))
     setSaving(p => ({ ...p, cong: false }))
     showMsg('Félicitations enregistrées')
   }
@@ -111,6 +147,7 @@ export default function SettingsPage() {
   async function saveConseilRanges() {
     setSaving(p => ({ ...p, conseil: true }))
     await api.put('/api/settings/conseil-decision-ranges', { ranges: conseilRanges })
+    setOrigConseilRanges(JSON.parse(JSON.stringify(conseilRanges)))
     setSaving(p => ({ ...p, conseil: false }))
     showMsg('Décisions enregistrées')
   }
@@ -158,7 +195,7 @@ export default function SettingsPage() {
       <section className="bg-white rounded-xl border border-steel-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xs font-semibold text-steel-400 uppercase tracking-wide">Barème d'appréciation</h2>
-          <button onClick={saveScale} disabled={saving.scale}
+          <button onClick={() => askConfirm("Barème d'appréciation", !eq(scale, origScale), saveScale, () => setScale(JSON.parse(JSON.stringify(origScale))))} disabled={saving.scale}
             className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
             {saving.scale ? 'Enregistrement...' : 'Enregistrer'}
           </button>
@@ -194,7 +231,7 @@ export default function SettingsPage() {
       <section className="bg-white rounded-xl border border-steel-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xs font-semibold text-steel-400 uppercase tracking-wide">Sections de l'école</h2>
-          <button onClick={saveSections} disabled={saving.sections}
+          <button onClick={() => askConfirm("Sections de l'école", !eq(sections, origSections), saveSections, () => setSections(JSON.parse(JSON.stringify(origSections))))} disabled={saving.sections}
             className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
             {saving.sections ? 'Enregistrement...' : 'Enregistrer'}
           </button>
@@ -236,7 +273,7 @@ export default function SettingsPage() {
             <h2 className="text-xs font-semibold text-steel-400 uppercase tracking-wide">Conduite par défaut</h2>
             <p className="text-xs text-steel-500 mt-1">Note de conduite affichée sur les bulletins si non modifiée. Modifiable par élève dans la fiche élève.</p>
           </div>
-          <button onClick={saveDefaultConduite} disabled={saving.conduite}
+          <button onClick={() => askConfirm('Conduite par défaut', defaultConduite !== origConduite, saveDefaultConduite, () => setDefaultConduite(origConduite))} disabled={saving.conduite}
             className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
             {saving.conduite ? 'Enregistrement...' : 'Enregistrer'}
           </button>
@@ -249,6 +286,26 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* Passage Cutoff */}
+      <section className="bg-white rounded-xl border border-steel-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xs font-semibold text-steel-400 uppercase tracking-wide">Seuil de passage en classe supérieure</h2>
+            <p className="text-xs text-steel-500 mt-1">Moyenne annuelle minimale (bilan des 3 trimestres) pour être admis. Affiché uniquement sur le bulletin du 3ème trimestre.</p>
+          </div>
+          <button onClick={() => askConfirm('Seuil de passage en classe supérieure', passageCutoff !== origPassage, savePassageCutoff, () => setPassageCutoff(origPassage))} disabled={saving.passage}
+            className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
+            {saving.passage ? 'Enregistrement...' : 'Enregistrer'}
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
+          <input type="number" min="0" max="20" step="0.5" value={passageCutoff}
+            onChange={e => setPassageCutoff(parseFloat(e.target.value) || 0)}
+            className="w-24 px-3 py-1.5 border border-steel-200 rounded-lg text-sm text-center focus:outline-none focus:border-brand" />
+          <span className="text-sm text-steel-500">/ 20</span>
+        </div>
+      </section>
+
       {/* Congratulations Config */}
       <section className="bg-white rounded-xl border border-steel-200 p-6">
         <div className="flex items-center justify-between mb-4">
@@ -256,7 +313,7 @@ export default function SettingsPage() {
             <h2 className="text-xs font-semibold text-steel-400 uppercase tracking-wide">Félicitations — Seuils</h2>
             <p className="text-xs text-steel-500 mt-1">Calculées automatiquement à la génération des bulletins.</p>
           </div>
-          <button onClick={saveCongCfg} disabled={saving.cong}
+          <button onClick={() => askConfirm('Félicitations — Seuils', !eq(congCfg, origCongCfg), saveCongCfg, () => setCongCfg(JSON.parse(JSON.stringify(origCongCfg))))} disabled={saving.cong}
             className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
             {saving.cong ? 'Enregistrement...' : 'Enregistrer'}
           </button>
@@ -290,7 +347,7 @@ export default function SettingsPage() {
             <h2 className="text-xs font-semibold text-steel-400 uppercase tracking-wide">Décision du conseil des professeurs</h2>
             <p className="text-xs text-steel-500 mt-1">Texte affiché sur le bulletin selon la moyenne. Calculé automatiquement.</p>
           </div>
-          <button onClick={saveConseilRanges} disabled={saving.conseil}
+          <button onClick={() => askConfirm('Décision du conseil des professeurs', !eq(conseilRanges, origConseilRanges), saveConseilRanges, () => setConseilRanges(JSON.parse(JSON.stringify(origConseilRanges))))} disabled={saving.conseil}
             className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
             {saving.conseil ? 'Enregistrement...' : 'Enregistrer'}
           </button>
@@ -334,6 +391,28 @@ export default function SettingsPage() {
 
       {/* Academic Settings */}
       <AcademicSettings showMsg={showMsg} />
+
+      {/* Confirmation modal */}
+      {confirm.show && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => { confirm.onCancel?.(); closeConfirm() }}>
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-steel-900 mb-1">Confirmer la modification</h3>
+            <p className="text-sm text-steel-500 mb-5">
+              Voulez-vous vraiment enregistrer les modifications apportées à <strong className="text-steel-800">{confirm.label}</strong> ?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => { confirm.onCancel?.(); closeConfirm() }}
+                className="px-4 py-2 border border-steel-200 text-steel-600 rounded-lg text-sm hover:bg-steel-50 transition-colors">
+                Annuler
+              </button>
+              <button onClick={() => { confirm.onConfirm(); closeConfirm() }}
+                className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors">
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

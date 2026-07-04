@@ -6,6 +6,18 @@ const { getDb } = require('../db/init')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
 
+// ─── GET /api/settings/school-logo — Serve logo (no auth — img tags can't send JWT) ──
+router.get('/school-logo', (req, res) => {
+  const db = getDb()
+  const logoPath = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_path'").get()?.value
+  if (!logoPath) return res.status(404).end()
+  const fullPath = path.join(__dirname, '../../data', logoPath)
+  if (!fs.existsSync(fullPath)) return res.status(404).end()
+  res.setHeader('Content-Type', 'image/png')
+  res.setHeader('Cache-Control', 'no-cache')
+  fs.createReadStream(fullPath).pipe(res)
+})
+
 router.use(requireAuth)
 
 // ─── GET /api/settings — All settings ───────────────────────
@@ -63,6 +75,7 @@ router.get('/', requirePermission('students.view'), (req, res) => {
     congratulations_config: congratulationsConfig,
     conseil_decision_ranges: conseilDecisionRanges,
     default_conduite_score: parseFloat(settings.default_conduite_score || '18'),
+    passage_cutoff: parseFloat(settings.passage_cutoff || '10'),
   })
 })
 
@@ -81,6 +94,15 @@ router.put('/school-sections', requirePermission('students.edit'), (req, res) =>
   if (!Array.isArray(sections)) return res.status(400).json({ error: 'INVALID' })
   const db = getDb()
   db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('school_section_config', ?, datetime('now'))").run(JSON.stringify(sections))
+  return res.json({ success: true })
+})
+
+// ─── PUT /api/settings/passage-cutoff ───────────────────────
+router.put('/passage-cutoff', requirePermission('students.edit'), (req, res) => {
+  const cutoff = parseFloat(req.body.cutoff)
+  if (isNaN(cutoff) || cutoff < 0 || cutoff > 20) return res.status(400).json({ error: 'INVALID' })
+  const db = getDb()
+  db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('passage_cutoff', ?, datetime('now'))").run(String(cutoff))
   return res.json({ success: true })
 })
 
@@ -151,15 +173,6 @@ router.delete('/school-logo', (req, res) => {
   return res.json({ success: true })
 })
 
-// ─── Serve logo file ─────────────────────────────────────────
-router.get('/school-logo', (req, res) => {
-  const db = getDb()
-  const logoPath = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_path'").get()?.value
-  if (!logoPath) return res.status(404).json({ error: 'NO_LOGO' })
-  const fullPath = path.join(__dirname, '../../data', logoPath)
-  if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'FILE_NOT_FOUND' })
-  res.sendFile(fullPath)
-})
 
 // ─── GET /api/settings/academic — Academic settings ──────────
 router.get('/academic', requirePermission('students.view'), (req, res) => {
@@ -315,7 +328,7 @@ router.post('/classrooms', requirePermission('students.edit'), (req, res) => {
       for (let sem = 1; sem <= periodeCount; sem++) {
         for (let i = 1; i <= assessConfig.interrogations; i++) tStmt.run(classroomId, sub.subject_id, parseInt(yearId), sem, 'interrogation', i, assessConfig.max_score, 1)
         for (let i = 1; i <= assessConfig.devoirs; i++) tStmt.run(classroomId, sub.subject_id, parseInt(yearId), sem, 'devoir', i, assessConfig.max_score, 1)
-        for (let i = 1; i <= assessConfig.compositions; i++) tStmt.run(classroomId, sub.subject_id, parseInt(yearId), sem, 'composition', i, assessConfig.max_score, 2)
+        for (let i = 1; i <= assessConfig.compositions; i++) tStmt.run(classroomId, sub.subject_id, parseInt(yearId), sem, 'composition', i, assessConfig.max_score, 1)
       }
     }
   })()

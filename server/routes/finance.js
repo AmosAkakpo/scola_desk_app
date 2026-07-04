@@ -13,19 +13,19 @@ function getYearId(db) {
 }
 
 function generateReceiptNumber(db, yearId, prefix) {
-  db.prepare(`
-    INSERT INTO receipt_sequences (academic_year_id, prefix, last_number)
-    VALUES (?, ?, 1)
-    ON CONFLICT(academic_year_id, prefix)
-    DO UPDATE SET last_number = last_number + 1
-  `).run(yearId, prefix)
-
-  const seq = db.prepare(
-    'SELECT last_number FROM receipt_sequences WHERE academic_year_id = ? AND prefix = ?'
-  ).get(yearId, prefix)
-
   const year = new Date().getFullYear()
-  return `${prefix}-${year}-${String(seq.last_number).padStart(4, '0')}`
+  let number, candidate
+  let attempts = 0
+  do {
+    number = String(Math.floor(100000000 + Math.random() * 900000000))
+    candidate = `${prefix}-${year}-${number}`
+    attempts++
+    if (attempts > 50) break
+  } while (
+    db.prepare('SELECT 1 FROM payments WHERE receipt_number = ? LIMIT 1').get(candidate) ||
+    db.prepare('SELECT 1 FROM salary_entries WHERE receipt_number = ? LIMIT 1').get(candidate)
+  )
+  return candidate
 }
 
 function getFeeAmountForStudent(db, feeTypeId, levelId) {

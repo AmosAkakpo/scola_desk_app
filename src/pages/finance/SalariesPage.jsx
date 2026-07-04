@@ -32,7 +32,7 @@ export default function SalariesPage() {
   const [showPay, setShowPay] = useState(null)
   function load() {
     setLoading(true)
-    api.get(`/api/finance/salaries?month=${month}`).then(res => {
+    api.get(`/api/finance/salaries?pay_period=${month}`).then(res => {
       setData(res.data)
       setLoading(false)
     }).catch(() => setLoading(false))

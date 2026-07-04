@@ -38,7 +38,7 @@ export default function StudentReceiptPage() {
     if (!printModal) return
     const style = document.createElement('style')
     style.id = 'scola-print-style'
-    style.textContent = '@media print { body > * { visibility: hidden !important; } #scola-print-content, #scola-print-content * { visibility: visible !important; } #scola-print-content { position: fixed !important; top: 0; left: 0; width: 100%; } }'
+    style.textContent = '@media print { @page { size: A4 portrait; margin: 0; } body * { visibility: hidden !important; } #scola-print-content { visibility: visible !important; position: fixed !important; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; } #scola-print-content * { visibility: visible !important; } }'
     document.head.appendChild(style)
     return () => { document.getElementById('scola-print-style')?.remove() }
   }, [printModal])
@@ -419,7 +419,7 @@ export default function StudentReceiptPage() {
       {/* Print modal */}
       {printModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setPrintModal(null)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
             <div id="scola-print-content" className="overflow-auto flex-1 p-6">
               {printModal.type === 'receipt'
                 ? <PrintReceipt data={printModal.data} />
@@ -440,112 +440,98 @@ export default function StudentReceiptPage() {
   )
 }
 
-function buildReceiptHTML(data) {
-  const school = data.school || {}
-  const p = data.data || {}
-  const lines = (p.allocations || []).map(a =>
-    `<tr><td>${a.fee_name}</td><td style="text-align:right">${new Intl.NumberFormat('fr-FR').format(Math.round(a.amount))} F</td></tr>`
-  ).join('')
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu ${p.receipt_number}</title>
-<style>body{font-family:Arial,sans-serif;font-size:12px;max-width:350px;margin:0 auto;padding:20px}
-h1{font-size:16px;text-align:center;margin:0 0 4px}
-.sub{text-align:center;font-size:10px;color:#666;margin-bottom:16px}
-.line{border-top:1px dashed #ccc;margin:10px 0}
-table{width:100%;border-collapse:collapse}td{padding:3px 0}
-.total{font-weight:bold;font-size:14px;border-top:2px solid #333;padding-top:6px}
-.meta{font-size:10px;color:#666}
-@media print{body{padding:0}}</style></head>
-<body>
-<h1>${school.school_name || 'ScolaDesk'}</h1>
-<div class="sub">${school.city || ''} — ${school.country || ''}<br>Code: ${school.school_code || ''}</div>
-<div class="line"></div>
-<p><strong>REÇU DE PAIEMENT</strong></p>
-<p>N°: <strong>${p.receipt_number || ''}</strong></p>
-<p>Date: ${p.payment_date ? new Date(p.payment_date).toLocaleDateString('fr-FR') : ''}</p>
-<p>Élève: <strong>${p.student_name || ''}</strong></p>
-<p>Classe: ${p.classroom_label || ''} — Matricule: ${p.matricule || ''}</p>
-<div class="line"></div>
-<table>${lines}
-<tr class="total"><td>TOTAL</td><td style="text-align:right">${new Intl.NumberFormat('fr-FR').format(Math.round(p.amount || 0))} F</td></tr></table>
-<div class="line"></div>
-<p class="meta">Mode: ${p.payment_method || ''} ${p.reference ? '— Réf: ' + p.reference : ''}</p>
-<p class="meta">Payé par: ${p.payer_name || '—'}</p>
-<p class="meta">Reçu par: ${p.receiver_name || '—'}</p>
-<div style="margin-top:30px;text-align:center;font-size:9px;color:#999">ScolaDesk — Système de gestion scolaire</div>
-</body></html>`
-}
-
-function buildStatementHTML(data) {
-  const school = data.school || {}
-  const student = data.student || {}
-  const summary = data.summary || {}
-  const lines = (data.fees || []).map(f =>
-    `<tr><td>${f.name}</td><td style="text-align:right">${new Intl.NumberFormat('fr-FR').format(Math.round(f.amount_due))} F</td><td style="text-align:right">${new Intl.NumberFormat('fr-FR').format(Math.round(f.amount_paid))} F</td><td style="text-align:right">${new Intl.NumberFormat('fr-FR').format(Math.round(f.remaining))} F</td></tr>`
-  ).join('')
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>État des frais</title>
-<style>body{font-family:Arial,sans-serif;font-size:12px;max-width:400px;margin:0 auto;padding:20px}
-h1{font-size:16px;text-align:center;margin:0 0 4px}
-.sub{text-align:center;font-size:10px;color:#666;margin-bottom:16px}
-.line{border-top:1px dashed #ccc;margin:10px 0}
-table{width:100%;border-collapse:collapse}td,th{padding:4px 2px;text-align:right}td:first-child,th:first-child{text-align:left}
-.total{font-weight:bold;border-top:2px solid #333}
-.meta{font-size:10px;color:#666}
-@media print{body{padding:0}}</style></head>
-<body>
-<h1>${school.school_name || 'ScolaDesk'}</h1>
-<div class="sub">${school.city || ''} — ${school.country || ''}</div>
-<div class="line"></div>
-<p style="text-align:center"><strong>ÉTAT DES FRAIS SCOLAIRES</strong><br>${student.year_label || ''}</p>
-<p>Élève: <strong>${student.full_name || ''}</strong></p>
-<p>Matricule: ${student.matricule || ''} — Classe: ${student.classroom_label || ''}</p>
-<div class="line"></div>
-<table>
-<tr><th>Frais</th><th>Montant</th><th>Payé</th><th>Reste</th></tr>
-${lines}
-<tr class="total"><td>TOTAL</td><td>${new Intl.NumberFormat('fr-FR').format(Math.round(summary.totalDue || 0))} F</td><td>${new Intl.NumberFormat('fr-FR').format(Math.round(summary.totalPaid || 0))} F</td><td>${new Intl.NumberFormat('fr-FR').format(Math.round(summary.remaining || 0))} F</td></tr>
-</table>
-<div class="line"></div>
-<p class="meta">Date: ${new Date().toLocaleDateString('fr-FR')}</p>
-<div style="margin-top:30px;text-align:center;font-size:9px;color:#999">ScolaDesk — Système de gestion scolaire</div>
-</body></html>`
-}
-
 function PrintReceipt({ data }) {
   const school = data.school || {}
   const p = data.data || {}
-  const fmtN = n => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0)) + ' F'
+  const fmtN = n => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0)) + ' F CFA'
+  const cellH = { padding: '6px 10px', border: '1px solid #ccc', backgroundColor: '#f0f0f0', fontWeight: 'bold', width: '20%', fontSize: 11, whiteSpace: 'nowrap' }
+  const cellV = { padding: '6px 10px', border: '1px solid #ccc', fontSize: 12 }
   return (
-    <div style={{ fontFamily: 'Arial, sans-serif', fontSize: 13, maxWidth: 360, margin: '0 auto' }}>
-      <p style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 16, margin: '0 0 2px' }}>{school.school_name || 'ScolaDesk'}</p>
-      <p style={{ textAlign: 'center', fontSize: 10, color: '#666', marginBottom: 16 }}>{school.city || ''}{school.country ? ` — ${school.country}` : ''}</p>
-      <hr style={{ borderTop: '1px dashed #ccc', margin: '10px 0' }} />
-      <p style={{ fontWeight: 'bold', marginBottom: 4 }}>REÇU DE PAIEMENT</p>
-      <p style={{ fontSize: 12, margin: '2px 0' }}>N° : <strong>{p.receipt_number || '—'}</strong></p>
-      <p style={{ fontSize: 12, margin: '2px 0' }}>Date : {p.payment_date ? new Date(p.payment_date).toLocaleDateString('fr-FR') : '—'}</p>
-      <p style={{ fontSize: 12, margin: '2px 0' }}>Élève : <strong>{p.student_name || '—'}</strong></p>
-      <p style={{ fontSize: 12, margin: '2px 0' }}>Classe : {p.classroom_label || '—'} — Matricule : {p.matricule || '—'}</p>
-      <hr style={{ borderTop: '1px dashed #ccc', margin: '10px 0' }} />
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+    <div style={{ fontFamily: 'Arial, sans-serif', padding: '12mm 16mm', fontSize: 12, color: '#000', minHeight: '297mm', boxSizing: 'border-box' }}>
+      {/* School header */}
+      <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: 10, marginBottom: 16 }}>
+        <p style={{ fontWeight: 'bold', fontSize: 18, margin: '0 0 3px' }}>{school.school_name || 'Établissement scolaire'}</p>
+        {(school.city || school.country) && (
+          <p style={{ fontSize: 11, margin: 0, color: '#555' }}>{[school.city, school.country].filter(Boolean).join(' — ')}</p>
+        )}
+        {school.phone && <p style={{ fontSize: 11, margin: '2px 0', color: '#555' }}>Tél : {school.phone}</p>}
+      </div>
+
+      {/* Title + receipt number */}
+      <div style={{ textAlign: 'center', margin: '16px 0 20px' }}>
+        <p style={{ fontWeight: 'bold', fontSize: 16, letterSpacing: 3, margin: 0, textTransform: 'uppercase' }}>Reçu de Paiement</p>
+        <p style={{ fontSize: 13, margin: '6px 0 0' }}>N° <strong style={{ fontSize: 14 }}>{p.receipt_number || '—'}</strong></p>
+      </div>
+
+      {/* Student + payment meta */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20 }}>
         <tbody>
-          {(p.allocations || []).map((a, i) => (
-            <tr key={i}>
-              <td style={{ padding: '3px 0' }}>{a.fee_name}</td>
-              <td style={{ padding: '3px 0', textAlign: 'right' }}>{fmtN(a.amount)}</td>
-            </tr>
-          ))}
-          <tr style={{ fontWeight: 'bold', borderTop: '2px solid #333' }}>
-            <td style={{ paddingTop: 6 }}>TOTAL</td>
-            <td style={{ paddingTop: 6, textAlign: 'right' }}>{fmtN(p.amount)}</td>
+          <tr>
+            <td style={cellH}>Élève</td>
+            <td style={{ ...cellV, fontWeight: 'bold' }}>{p.student_name || '—'}</td>
+            <td style={cellH}>Date</td>
+            <td style={cellV}>{p.payment_date ? new Date(p.payment_date).toLocaleDateString('fr-FR') : '—'}</td>
           </tr>
+          <tr>
+            <td style={cellH}>Matricule</td>
+            <td style={cellV}>{p.matricule || '—'}</td>
+            <td style={cellH}>Mode</td>
+            <td style={cellV}>{p.payment_method?.replace('_', ' ') || '—'}</td>
+          </tr>
+          <tr>
+            <td style={cellH}>Classe</td>
+            <td style={cellV}>{p.classroom_label || '—'}</td>
+            <td style={cellH}>Payé par</td>
+            <td style={cellV}>{p.payer_name || '—'}</td>
+          </tr>
+          {p.reference && (
+            <tr>
+              <td style={cellH}>Référence</td>
+              <td style={cellV} colSpan={3}>{p.reference}</td>
+            </tr>
+          )}
         </tbody>
       </table>
-      <hr style={{ borderTop: '1px dashed #ccc', margin: '10px 0' }} />
-      <p style={{ fontSize: 10, color: '#666', margin: '2px 0' }}>Mode : {p.payment_method || '—'}{p.reference ? ` — Réf : ${p.reference}` : ''}</p>
-      <p style={{ fontSize: 10, color: '#666', margin: '2px 0' }}>Payé par : {p.payer_name || '—'}</p>
-      <p style={{ fontSize: 10, color: '#666', margin: '2px 0' }}>Reçu par : {p.receiver_name || '—'}</p>
-      <p style={{ marginTop: 30, textAlign: 'center', fontSize: 9, color: '#999' }}>ScolaDesk — Système de gestion scolaire</p>
+
+      {/* Fee lines */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 24 }}>
+        <thead>
+          <tr style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>
+            <th style={{ padding: '9px 12px', textAlign: 'left', fontSize: 12 }}>Désignation</th>
+            <th style={{ padding: '9px 12px', textAlign: 'right', fontSize: 12, width: '35%' }}>Montant</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(p.allocations || []).map((a, i) => (
+            <tr key={i} style={{ backgroundColor: i % 2 ? '#f7f7f7' : '#fff' }}>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #e5e5e5' }}>{a.fee_name}</td>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #e5e5e5', textAlign: 'right' }}>{fmtN(a.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ backgroundColor: '#f0f0f0', fontWeight: 'bold', borderTop: '2px solid #333' }}>
+            <td style={{ padding: '10px 12px', fontSize: 14 }}>TOTAL PAYÉ</td>
+            <td style={{ padding: '10px 12px', fontSize: 14, textAlign: 'right' }}>{fmtN(p.amount)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      {p.notes && <p style={{ fontSize: 11, color: '#555', marginBottom: 8 }}>Notes : {p.notes}</p>}
+
+      {/* Signature block */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 48, fontSize: 12 }}>
+        <div style={{ textAlign: 'center', minWidth: 180 }}>
+          <p style={{ fontWeight: 'bold', marginBottom: 40 }}>Signature du payeur</p>
+          <div style={{ borderTop: '1px solid #000', paddingTop: 4 }}>{p.payer_name || '________________________'}</div>
+        </div>
+        <div style={{ textAlign: 'center', minWidth: 180 }}>
+          <p style={{ fontWeight: 'bold', marginBottom: 40 }}>Cachet et signature</p>
+          <div style={{ borderTop: '1px solid #000', paddingTop: 4 }}>{p.receiver_name || '________________________'}</div>
+        </div>
+      </div>
+
+      <p style={{ marginTop: 'auto', paddingTop: 40, textAlign: 'center', fontSize: 9, color: '#bbb' }}>ScolaDesk — Système de gestion scolaire</p>
     </div>
   )
 }
@@ -555,45 +541,73 @@ function PrintStatement({ data }) {
   const student = data.student || {}
   const summary = data.summary || {}
   const fees = data.fees || []
-  const fmtN = n => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0)) + ' F'
+  const fmtN = n => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0)) + ' F CFA'
+  const cellH = { padding: '6px 10px', border: '1px solid #ccc', backgroundColor: '#f0f0f0', fontWeight: 'bold', width: '20%', fontSize: 11, whiteSpace: 'nowrap' }
+  const cellV = { padding: '6px 10px', border: '1px solid #ccc', fontSize: 12 }
   return (
-    <div style={{ fontFamily: 'Arial, sans-serif', fontSize: 13, maxWidth: 420, margin: '0 auto' }}>
-      <p style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 16, margin: '0 0 2px' }}>{school.school_name || 'ScolaDesk'}</p>
-      <p style={{ textAlign: 'center', fontSize: 10, color: '#666', marginBottom: 16 }}>{school.city || ''}{school.country ? ` — ${school.country}` : ''}</p>
-      <hr style={{ borderTop: '1px dashed #ccc', margin: '10px 0' }} />
-      <p style={{ textAlign: 'center', fontWeight: 'bold', marginBottom: 8 }}>ÉTAT DES FRAIS SCOLAIRES<br /><span style={{ fontWeight: 'normal', fontSize: 11 }}>{student.year_label || ''}</span></p>
-      <p style={{ fontSize: 12, margin: '2px 0' }}>Élève : <strong>{student.full_name || '—'}</strong></p>
-      <p style={{ fontSize: 12, margin: '2px 0' }}>Matricule : {student.matricule || '—'} — Classe : {student.classroom_label || '—'}</p>
-      <hr style={{ borderTop: '1px dashed #ccc', margin: '10px 0' }} />
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+    <div style={{ fontFamily: 'Arial, sans-serif', padding: '12mm 16mm', fontSize: 12, color: '#000', minHeight: '297mm', boxSizing: 'border-box' }}>
+      {/* School header */}
+      <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: 10, marginBottom: 16 }}>
+        <p style={{ fontWeight: 'bold', fontSize: 18, margin: '0 0 3px' }}>{school.school_name || 'Établissement scolaire'}</p>
+        {(school.city || school.country) && (
+          <p style={{ fontSize: 11, margin: 0, color: '#555' }}>{[school.city, school.country].filter(Boolean).join(' — ')}</p>
+        )}
+      </div>
+
+      {/* Title */}
+      <div style={{ textAlign: 'center', margin: '16px 0 20px' }}>
+        <p style={{ fontWeight: 'bold', fontSize: 16, letterSpacing: 3, margin: 0, textTransform: 'uppercase' }}>État des Frais Scolaires</p>
+        <p style={{ fontSize: 12, margin: '5px 0 0', color: '#555' }}>{student.year_label || ''}</p>
+      </div>
+
+      {/* Student info */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20 }}>
+        <tbody>
+          <tr>
+            <td style={cellH}>Élève</td>
+            <td style={{ ...cellV, fontWeight: 'bold' }}>{student.full_name || '—'}</td>
+            <td style={cellH}>Matricule</td>
+            <td style={cellV}>{student.matricule || '—'}</td>
+          </tr>
+          <tr>
+            <td style={cellH}>Classe</td>
+            <td style={cellV} colSpan={3}>{student.classroom_label || '—'}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Fee table */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 24 }}>
         <thead>
-          <tr style={{ borderBottom: '1px solid #ccc' }}>
-            <th style={{ textAlign: 'left', padding: '3px 2px' }}>Frais</th>
-            <th style={{ textAlign: 'right', padding: '3px 2px' }}>Montant</th>
-            <th style={{ textAlign: 'right', padding: '3px 2px' }}>Payé</th>
-            <th style={{ textAlign: 'right', padding: '3px 2px' }}>Reste</th>
+          <tr style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>
+            <th style={{ padding: '9px 12px', textAlign: 'left', fontSize: 12 }}>Frais</th>
+            <th style={{ padding: '9px 12px', textAlign: 'right', fontSize: 12, width: '22%' }}>Montant dû</th>
+            <th style={{ padding: '9px 12px', textAlign: 'right', fontSize: 12, width: '22%' }}>Payé</th>
+            <th style={{ padding: '9px 12px', textAlign: 'right', fontSize: 12, width: '22%' }}>Reste</th>
           </tr>
         </thead>
         <tbody>
           {fees.map((f, i) => (
-            <tr key={i}>
-              <td style={{ padding: '3px 2px' }}>{f.name}</td>
-              <td style={{ padding: '3px 2px', textAlign: 'right' }}>{fmtN(f.amount_due)}</td>
-              <td style={{ padding: '3px 2px', textAlign: 'right' }}>{fmtN(f.amount_paid)}</td>
-              <td style={{ padding: '3px 2px', textAlign: 'right' }}>{fmtN(f.remaining)}</td>
+            <tr key={i} style={{ backgroundColor: i % 2 ? '#f7f7f7' : '#fff' }}>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #e5e5e5' }}>{f.name}</td>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #e5e5e5', textAlign: 'right' }}>{fmtN(f.amount_due)}</td>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #e5e5e5', textAlign: 'right', color: '#166534' }}>{fmtN(f.amount_paid)}</td>
+              <td style={{ padding: '8px 12px', borderBottom: '1px solid #e5e5e5', textAlign: 'right', fontWeight: f.remaining > 0 ? 'bold' : 'normal', color: f.remaining > 0 ? '#b91c1c' : '#166534' }}>{fmtN(f.remaining)}</td>
             </tr>
           ))}
-          <tr style={{ fontWeight: 'bold', borderTop: '2px solid #333' }}>
-            <td style={{ paddingTop: 6 }}>TOTAL</td>
-            <td style={{ paddingTop: 6, textAlign: 'right' }}>{fmtN(summary.totalDue)}</td>
-            <td style={{ paddingTop: 6, textAlign: 'right' }}>{fmtN(summary.totalPaid)}</td>
-            <td style={{ paddingTop: 6, textAlign: 'right' }}>{fmtN(summary.remaining)}</td>
-          </tr>
         </tbody>
+        <tfoot>
+          <tr style={{ backgroundColor: '#f0f0f0', fontWeight: 'bold', borderTop: '2px solid #333', fontSize: 13 }}>
+            <td style={{ padding: '10px 12px' }}>TOTAL</td>
+            <td style={{ padding: '10px 12px', textAlign: 'right' }}>{fmtN(summary.totalDue)}</td>
+            <td style={{ padding: '10px 12px', textAlign: 'right', color: '#166534' }}>{fmtN(summary.totalPaid)}</td>
+            <td style={{ padding: '10px 12px', textAlign: 'right', color: summary.remaining > 0 ? '#b91c1c' : '#166534' }}>{fmtN(summary.remaining)}</td>
+          </tr>
+        </tfoot>
       </table>
-      <hr style={{ borderTop: '1px dashed #ccc', margin: '10px 0' }} />
-      <p style={{ fontSize: 10, color: '#666' }}>Date : {new Date().toLocaleDateString('fr-FR')}</p>
-      <p style={{ marginTop: 30, textAlign: 'center', fontSize: 9, color: '#999' }}>ScolaDesk — Système de gestion scolaire</p>
+
+      <p style={{ fontSize: 11, color: '#555' }}>Édité le : {new Date().toLocaleDateString('fr-FR')}</p>
+      <p style={{ marginTop: 'auto', paddingTop: 40, textAlign: 'center', fontSize: 9, color: '#bbb' }}>ScolaDesk — Système de gestion scolaire</p>
     </div>
   )
 }

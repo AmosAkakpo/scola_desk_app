@@ -23,6 +23,35 @@ function getTemplates(db, classroomId, subjectId, yearId, semester) {
   `).all(classroomId, subjectId, yearId, semester)
 }
 
+// Compute subject raw average:
+//   moy_interro = avg of all non-absent interrogations (normalized /20), counts as 1 slot
+//   each non-absent devoir/composition counts as 1 slot individually (normalized /20)
+//   rawAvg = sum(slots) / count(slots)
+function computeRawAverage(templates, getScore) {
+  const interros = templates.filter(t => t.assessment_type === 'interrogation')
+  const others = templates.filter(t => t.assessment_type !== 'interrogation')
+
+  let interroSum = 0, interroCount = 0
+  for (const t of interros) {
+    const s = getScore(t)
+    if (s && s.score !== null && s.is_absent !== 1) {
+      interroSum += (s.score / t.max_score) * 20
+      interroCount++
+    }
+  }
+
+  const slots = []
+  if (interroCount > 0) slots.push(interroSum / interroCount)
+  for (const t of others) {
+    const s = getScore(t)
+    if (s && s.score !== null && s.is_absent !== 1) {
+      slots.push((s.score / t.max_score) * 20)
+    }
+  }
+
+  return slots.length > 0 ? parseFloat((slots.reduce((a, b) => a + b, 0) / slots.length).toFixed(2)) : null
+}
+
 // Subjects of a classroom (respects serie). Returns [{ subject_id, subject_name }] sorted A-Z.
 function getClassroomSubjects(db, classroomId) {
   const classroom = db.prepare('SELECT level_id, serie_id FROM classrooms WHERE id = ?').get(classroomId)
@@ -228,31 +257,22 @@ router.get('/:classroomId/:subjectId/:semester', requirePermission('grades.view'
       if (existing && (existing.score !== null || existing.is_absent === 1)) totalGraded++
     })
 
-    // Compute averages
+    // Compute per-type display averages and overall average
     const byType = {}
     templates.forEach(t => {
-      if (!byType[t.assessment_type]) byType[t.assessment_type] = { total: 0, count: 0, weight: t.weight, max: t.max_score }
+      if (!byType[t.assessment_type]) byType[t.assessment_type] = { total: 0, count: 0, max: t.max_score }
       const s = scores[t.id]
       if (s.score !== null && !s.is_absent) {
         byType[t.assessment_type].total += s.score
         byType[t.assessment_type].count++
       }
     })
-
     const typeAverages = {}
-    let weightedSum = 0, weightTotal = 0
     for (const [type, data] of Object.entries(byType)) {
-      if (data.count > 0) {
-        const avg = (data.total / data.count) * (data.max === 20 ? 1 : 20 / data.max)
-        typeAverages[type] = parseFloat(avg.toFixed(2))
-        weightedSum += avg * data.weight
-        weightTotal += data.weight
-      } else {
-        typeAverages[type] = null
-      }
+      typeAverages[type] = data.count > 0 ? parseFloat(((data.total / data.count) * (data.max === 20 ? 1 : 20 / data.max)).toFixed(2)) : null
     }
 
-    const average = weightTotal > 0 ? parseFloat((weightedSum / weightTotal).toFixed(2)) : null
+    const average = computeRawAverage(templates, t => scores[t.id])
     const moyCoef = average !== null ? parseFloat((average * coefficient).toFixed(2)) : null
 
     return {
@@ -536,26 +556,7 @@ router.post('/compute/:classroomId/:semester', requirePermission('grades.edit'),
     for (const ls of levelSubjects) {
       const templates = templatesBySubject[ls.subject_id] || []
 
-      const byType = {}
-      for (const t of templates) {
-        const score = scoreMap[`${t.id}_${student.student_id}`]
-        if (!byType[t.assessment_type]) byType[t.assessment_type] = { total: 0, count: 0, weight: t.weight, max: t.max_score }
-        if (score && score.score !== null && score.is_absent !== 1) {
-          byType[t.assessment_type].total += score.score
-          byType[t.assessment_type].count++
-        }
-      }
-
-      let weightedSum = 0, weightTotal = 0
-      for (const data of Object.values(byType)) {
-        if (data.count > 0) {
-          const avg = (data.total / data.count) * (data.max === 20 ? 1 : 20 / data.max)
-          weightedSum += avg * data.weight
-          weightTotal += data.weight
-        }
-      }
-
-      const rawAverage = weightTotal > 0 ? parseFloat((weightedSum / weightTotal).toFixed(2)) : null
+      const rawAverage = computeRawAverage(templates, t => scoreMap[`${t.id}_${student.student_id}`])
       const weightedAverage = rawAverage !== null ? parseFloat((rawAverage * ls.coefficient).toFixed(2)) : null
 
       if (rawAverage !== null) {
@@ -794,25 +795,7 @@ router.get('/verification-pdf', requirePermission('grades.view'), (req, res) => 
           return sc.score !== null ? sc.score : null
         })
 
-        // Same weighted-average formula as /compute
-        const byType = {}
-        for (const t of templates) {
-          const sc = scoreMap[`${t.id}_${st.student_id}`]
-          if (!byType[t.assessment_type]) byType[t.assessment_type] = { total: 0, count: 0, weight: t.weight, max: t.max_score }
-          if (sc && sc.score !== null && sc.is_absent !== 1) {
-            byType[t.assessment_type].total += sc.score
-            byType[t.assessment_type].count++
-          }
-        }
-        let weightedSum = 0, weightTotal = 0
-        for (const data of Object.values(byType)) {
-          if (data.count > 0) {
-            const avg = (data.total / data.count) * (data.max === 20 ? 1 : 20 / data.max)
-            weightedSum += avg * data.weight
-            weightTotal += data.weight
-          }
-        }
-        const average = weightTotal > 0 ? parseFloat((weightedSum / weightTotal).toFixed(2)) : null
+        const average = computeRawAverage(templates, t => scoreMap[`${t.id}_${st.student_id}`])
         return { student_id: st.student_id, full_name: st.full_name, scores, average, rank: null, rank_ex: false }
       })
 

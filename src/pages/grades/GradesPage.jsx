@@ -115,39 +115,48 @@ function drawVerificationPage(doc, classroomLabel, subj, semesterLabel, yearLabe
 }
 
 function recomputeRows(rows, templates, coefficient, appreciationScale) {
-  const typeGroups = {}
-  templates.forEach(t => {
-    if (!typeGroups[t.assessment_type]) typeGroups[t.assessment_type] = { weight: t.weight, max: t.max_score }
-  })
+  const interroTemplates = templates.filter(t => t.assessment_type === 'interrogation')
+  const otherTemplates = templates.filter(t => t.assessment_type !== 'interrogation')
 
   const computed = rows.map(row => {
     let totalGraded = 0
-    const byType = {}
-
     templates.forEach(t => {
       const s = row.scores[t.id] || {}
       if (s.score !== null || s.is_absent) totalGraded++
-      if (!byType[t.assessment_type]) byType[t.assessment_type] = { total: 0, count: 0, weight: t.weight, max: t.max_score }
+    })
+
+    // Per-type averages for display (moy interro, etc.)
+    const byType = {}
+    templates.forEach(t => {
+      if (!byType[t.assessment_type]) byType[t.assessment_type] = { total: 0, count: 0, max: t.max_score }
+      const s = row.scores[t.id] || {}
       if (s.score !== null && !s.is_absent) {
         byType[t.assessment_type].total += s.score
         byType[t.assessment_type].count++
       }
     })
-
     const typeAverages = {}
-    let weightedSum = 0, weightTotal = 0
     for (const [type, data] of Object.entries(byType)) {
-      if (data.count > 0) {
-        const avg = (data.total / data.count) * (data.max === 20 ? 1 : 20 / data.max)
-        typeAverages[type] = parseFloat(avg.toFixed(2))
-        weightedSum += avg * data.weight
-        weightTotal += data.weight
-      } else {
-        typeAverages[type] = null
-      }
+      typeAverages[type] = data.count > 0 ? parseFloat(((data.total / data.count) * (data.max === 20 ? 1 : 20 / data.max)).toFixed(2)) : null
     }
 
-    const average = weightTotal > 0 ? parseFloat((weightedSum / weightTotal).toFixed(2)) : null
+    // Overall average: (moy_interro + each_devoir + each_compo) / total_slots
+    let interroSum = 0, interroCount = 0
+    for (const t of interroTemplates) {
+      const s = row.scores[t.id] || {}
+      if (s.score !== null && !s.is_absent) {
+        interroSum += (s.score / t.max_score) * 20
+        interroCount++
+      }
+    }
+    const slots = []
+    if (interroCount > 0) slots.push(interroSum / interroCount)
+    for (const t of otherTemplates) {
+      const s = row.scores[t.id] || {}
+      if (s.score !== null && !s.is_absent) slots.push((s.score / t.max_score) * 20)
+    }
+
+    const average = slots.length > 0 ? parseFloat((slots.reduce((a, b) => a + b, 0) / slots.length).toFixed(2)) : null
     const moyCoef = average !== null ? parseFloat((average * coefficient).toFixed(2)) : null
 
     let appreciation = ''

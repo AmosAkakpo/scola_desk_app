@@ -12,7 +12,7 @@ export function BulletinContent({ d }) {
         <div className="flex items-start justify-between mb-3" style={{ borderBottom: '2px solid #000', paddingBottom: '6px' }}>
           <div className="w-20 h-20 flex items-center justify-center">
             {d.school.logo_path ? (
-              <img src={`/api/settings/school-logo`} alt="" className="max-w-full max-h-full object-contain" />
+              <img src={`/api/settings/school-logo?t=${d.school.logo_path ? encodeURIComponent(d.school.logo_path) : 'logo'}`} alt="" className="max-w-full max-h-full object-contain" />
             ) : (
               <div className="w-14 h-14 border-2 border-steel-400 rounded-lg flex items-center justify-center">
                 <span className="text-steel-400 text-xl font-bold">S</span>
@@ -26,7 +26,7 @@ export function BulletinContent({ d }) {
             <p className="text-[9pt] mt-0.5">Année Scolaire {d.academic_year}</p>
           </div>
           <div className="w-20 h-20 flex items-center justify-center">
-            <img src="/api/settings/benin-flag" alt="Drapeau du Bénin" className="max-w-full max-h-full object-contain" />
+            <img src="/drapeau_benin.png" alt="Drapeau du Bénin" className="max-w-full max-h-full object-contain" />
           </div>
         </div>
 
@@ -113,7 +113,7 @@ export function BulletinContent({ d }) {
           </div>
         )}
 
-        {/* Cross-semester summary */}
+        {/* Cross-semester bilan — always show all rows; future semesters and total show — until data exists */}
         <table className="w-full border-collapse mb-3" style={{ fontSize: '9pt' }}>
           <thead>
             <tr style={{ backgroundColor: '#f0f0f0' }}>
@@ -125,15 +125,28 @@ export function BulletinContent({ d }) {
             </tr>
           </thead>
           <tbody>
-            {d.cross_semesters.map(cs => (
-              <tr key={cs.semester}>
-                <td className="border border-steel-300 px-1 py-0.5">Bilan {cs.semester === 1 ? '1er' : `${cs.semester}ème`} Trimestre</td>
-                <td className="border border-steel-300 px-1 py-0.5 text-center">{cs.average?.toFixed(2) ?? '—'}</td>
-                <td className="border border-steel-300 px-1 py-0.5 text-center">{cs.rank ? `${cs.rank}ème/${cs.class_size}` : '—'}</td>
-                <td className="border border-steel-300 px-1 py-0.5 text-center">{cs.highest?.toFixed(2) ?? '—'}</td>
-                <td className="border border-steel-300 px-1 py-0.5 text-center">{cs.lowest?.toFixed(2) ?? '—'}</td>
-              </tr>
-            ))}
+            {d.cross_semesters.map(cs => {
+              const hasData = cs.semester <= sem && cs.average != null
+              return (
+                <tr key={cs.semester}>
+                  <td className="border border-steel-300 px-1 py-0.5">Bilan {cs.semester === 1 ? '1er' : `${cs.semester}ème`} Trimestre</td>
+                  <td className="border border-steel-300 px-1 py-0.5 text-center">{hasData ? cs.average.toFixed(2) : '—'}</td>
+                  <td className="border border-steel-300 px-1 py-0.5 text-center">{hasData && cs.rank ? `${cs.rank}ème/${cs.class_size}` : '—'}</td>
+                  <td className="border border-steel-300 px-1 py-0.5 text-center">{hasData ? (cs.highest?.toFixed(2) ?? '—') : '—'}</td>
+                  <td className="border border-steel-300 px-1 py-0.5 text-center">{hasData ? (cs.lowest?.toFixed(2) ?? '—') : '—'}</td>
+                </tr>
+              )
+            })}
+            {/* Bilan Annuel row — always shown; values only on last semester */}
+            <tr style={{ backgroundColor: '#f0f0f0', fontWeight: 'bold' }}>
+              <td className="border border-steel-400 px-1 py-1">Bilan Annuel</td>
+              <td className="border border-steel-400 px-1 py-1 text-center">{d.annual_average != null ? d.annual_average.toFixed(2) : '—'}</td>
+              <td className="border border-steel-400 px-1 py-1 text-center">
+                {d.annual_rank != null ? `${d.annual_rank}ème/${d.cross_semesters.find(cs => cs.class_size)?.class_size ?? '—'}` : '—'}
+              </td>
+              <td className="border border-steel-400 px-1 py-1 text-center">—</td>
+              <td className="border border-steel-400 px-1 py-1 text-center">—</td>
+            </tr>
           </tbody>
         </table>
 
@@ -157,9 +170,21 @@ export function BulletinContent({ d }) {
                 {d.decision.conseil_decision}
               </p>
             ) : (
-              <p>___________________________</p>
+              <p style={{ color: '#555' }}>—</p>
             )}
           </div>
+        </div>
+
+        {/* Admission en classe supérieure — row always visible; value only on last semester */}
+        <div style={{ border: '1px solid #ccc', padding: '4px 8px', fontSize: '9pt', marginBottom: '8px' }}>
+          <span className="font-bold">Admission en classe supérieure :&nbsp;</span>
+          {d.passage_admis != null ? (
+            <span style={{ fontWeight: 700, color: d.passage_admis ? '#166534' : '#b91c1c' }}>
+              {d.passage_admis ? 'Admis(e)' : 'Non admis(e)'}
+            </span>
+          ) : (
+            <span style={{ color: '#888' }}>—</span>
+          )}
         </div>
 
         {/* Footer */}

@@ -9,6 +9,7 @@ export default function ReportCardsPage() {
   const [classroomId, setClassroomId] = useState('')
   const [snapshots, setSnapshots] = useState([])
   const [generating, setGenerating] = useState(false)
+  const [generateStep, setGenerateStep] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
@@ -32,8 +33,12 @@ export default function ReportCardsPage() {
   async function handleGenerate() {
     if (!classroomId) return
     setGenerating(true)
+    setGenerateStep('Calcul des moyennes...')
+    await api.post(`/api/grades/compute/${classroomId}/${semester}`)
+    setGenerateStep('Génération des bulletins...')
     await api.post('/api/report-cards/generate', { classroom_id: parseInt(classroomId), semester })
     setGenerating(false)
+    setGenerateStep('')
     loadSnapshots()
   }
 
@@ -72,7 +77,7 @@ export default function ReportCardsPage() {
         </div>
         <button onClick={handleGenerate} disabled={!classroomId || generating}
           className="px-4 py-2 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
-          {generating ? 'Génération...' : 'Générer les bulletins'}
+          {generating ? generateStep : 'Générer les bulletins'}
         </button>
         {snapshots.length > 0 && (
           <button onClick={handlePrintAll}
@@ -92,7 +97,6 @@ export default function ReportCardsPage() {
       ) : snapshots.length === 0 ? (
         <div className="bg-white rounded-xl border border-steel-200 p-12 text-center">
           <p className="text-steel-400 text-sm">Aucun bulletin généré. Cliquez sur "Générer les bulletins".</p>
-          <p className="text-steel-400 text-xs mt-1">Assurez-vous d'avoir calculé les moyennes d'abord.</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-steel-200 overflow-hidden">

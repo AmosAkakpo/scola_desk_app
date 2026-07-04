@@ -85,6 +85,7 @@ router.post('/generate', requirePermission('reports.edit'), (req, res) => {
   try { const r = JSON.parse(db.prepare("SELECT value FROM app_settings WHERE key = 'conseil_decision_ranges'").get()?.value || '[]'); if (r.length) conseilRanges = r } catch {}
 
   const defaultConduite = parseFloat(db.prepare("SELECT value FROM app_settings WHERE key = 'default_conduite_score'").get()?.value || '18')
+  const passageCutoff = parseFloat(db.prepare("SELECT value FROM app_settings WHERE key = 'passage_cutoff'").get()?.value || '10')
 
   const defaultAppScale = [
     { min: 16, max: 20, label: 'Très Bien' }, { min: 14, max: 15.99, label: 'Bien' },
@@ -99,6 +100,30 @@ router.post('/generate', requirePermission('reports.edit'), (req, res) => {
   }
 
   let generated = 0
+
+  // For the last semester: pre-compute annual averages + annual rank for all students
+  const annualAvgMap = {}
+  const annualRankMap = {}
+  if (parseInt(semester) === periodeCount) {
+    for (const student of students) {
+      const semAvgs = []
+      for (let s = 1; s <= periodeCount; s++) {
+        const ss = db.prepare('SELECT semester_average FROM semester_summaries WHERE student_id = ? AND classroom_id = ? AND academic_year_id = ? AND semester = ?')
+          .get(student.id, classroom_id, yearId, s)
+        if (ss?.semester_average != null) semAvgs.push(ss.semester_average)
+      }
+      annualAvgMap[student.id] = semAvgs.length > 0
+        ? parseFloat((semAvgs.reduce((a, b) => a + b, 0) / semAvgs.length).toFixed(2))
+        : null
+    }
+    // 1224 ranking on annual average
+    for (const student of students) {
+      const myAvg = annualAvgMap[student.id]
+      if (myAvg === null) { annualRankMap[student.id] = null; continue }
+      const rank = Object.values(annualAvgMap).filter(a => a !== null && a > myAvg).length + 1
+      annualRankMap[student.id] = rank
+    }
+  }
 
   db.transaction(() => {
     // Delete existing snapshots for these students+semester (regenerate)
@@ -171,12 +196,17 @@ router.post('/generate', requirePermission('reports.edit'), (req, res) => {
       const felicitation = qualifies && rank !== null && rank <= percentileN ? 1 : 0
       const tableauHonneur = qualifies && rank !== null && rank <= topN ? 1 : 0
 
-      // Auto-compute conseil decision from average
-      let conseilText = null, conseilPass = null
-      if (avg !== null) {
-        const match = conseilRanges.find(r => avg >= r.min && avg <= r.max)
-        if (match) { conseilText = match.text; conseilPass = match.pass ? 1 : 0 }
-      }
+      // Conseil decision: "Travail [Appréciation du trimestre]"
+      const travailLabel = getAppreciation(avg)
+      const conseilText = travailLabel ? `Travail ${travailLabel}` : null
+      const conseilPass = avg !== null ? (avg >= passageCutoff ? 1 : 0) : null
+
+      // Annual average + passage admis (last semester only)
+      const annualAvg = annualAvgMap[student.id] ?? null
+      const annualRank = annualRankMap[student.id] ?? null
+      const passageAdmis = parseInt(semester) === periodeCount
+        ? (annualAvg !== null ? annualAvg >= passageCutoff : null)
+        : null
 
       // Upsert auto-computed fields — preserve manual sanctions (avertissement, blame)
       db.prepare(`
@@ -273,14 +303,17 @@ router.post('/generate', requirePermission('reports.edit'), (req, res) => {
           highest: cs.class_highest_average,
           lowest: cs.class_lowest_average,
         } : { semester: i + 1, average: null, rank: null, class_size: null, highest: null, lowest: null }),
+        annual_average: annualAvg,
+        annual_rank: annualRank,
+        passage_admis: passageAdmis,
+        passage_cutoff: passageCutoff,
         decision: decision ? {
-          conduite_score: decision.conduite_score,
+          conduite_score: decision.conduite_score ?? defaultConduite,
           avertissement: decision.avertissement === 1,
           blame: decision.blame === 1,
           felicitation: decision.felicitation === 1,
           encouragement: decision.encouragement === 1,
           tableau_honneur: decision.tableau_honneur === 1,
-          conduite_score: decision.conduite_score ?? defaultConduite,
           conseil_decision: decision.conseil_decision,
           conseil_decision_pass: decision.conseil_decision_pass === 1,
         } : { conduite_score: defaultConduite },

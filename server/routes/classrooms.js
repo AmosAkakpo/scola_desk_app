@@ -104,7 +104,7 @@ router.post('/', requirePermission('students.edit'), (req, res) => {
       for (let sem = 1; sem <= periodeCount; sem++) {
         for (let i = 1; i <= cfg.interrogations; i++) tpl.run(classroomId, sub.subject_id, parseInt(yearId), sem, 'interrogation', i, cfg.max_score, 1)
         for (let i = 1; i <= cfg.devoirs; i++) tpl.run(classroomId, sub.subject_id, parseInt(yearId), sem, 'devoir', i, cfg.max_score, 1)
-        for (let i = 1; i <= cfg.compositions; i++) tpl.run(classroomId, sub.subject_id, parseInt(yearId), sem, 'composition', i, cfg.max_score, 2)
+        for (let i = 1; i <= cfg.compositions; i++) tpl.run(classroomId, sub.subject_id, parseInt(yearId), sem, 'composition', i, cfg.max_score, 1)
       }
     }
 
