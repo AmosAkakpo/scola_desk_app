@@ -22,6 +22,7 @@ import FinanceDashboardPage from './pages/finance/FinanceDashboardPage'
 import TuitionPage from './pages/finance/TuitionPage'
 import StudentReceiptPage from './pages/finance/StudentReceiptPage'
 import SalariesPage from './pages/finance/SalariesPage'
+import TeacherSalaryPage from './pages/finance/TeacherSalaryPage'
 import ExpensesPage from './pages/finance/ExpensesPage'
 import FinanceSettingsPage from './pages/finance/FinanceSettingsPage'
 import SubscriptionPage from './pages/finance/SubscriptionPage'
@@ -119,7 +120,8 @@ function ProtectedApp({ schoolInfo }) {
           <Route path="/finance/tuition" element={<TuitionPage />} />
           <Route path="/finance/tuition/:studentId" element={<StudentReceiptPage />} />
           <Route path="/finance/salaries" element={<SalariesPage />} />
-          <Route path="/finance/expenses" element={<ExpensesPage />} />
+          <Route path="/finance/salaries/:teacherId" element={<TeacherSalaryPage />} />
+<Route path="/finance/expenses" element={<ExpensesPage />} />
           <Route path="/finance/settings" element={<FinanceSettingsPage />} />
           <Route path="/finance/subscription" element={<SubscriptionPage />} />
           <Route path="/finance/attendance" element={<AttendancePage />} />

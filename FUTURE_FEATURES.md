@@ -18,6 +18,10 @@
   - **Audit**: record source filename + importer + timestamp.
   *(Deferred: 2026-06-23, reason: in-app grade grid is the reliable primary path for now; Excel round-trip needs the safety work above before real report-card grades depend on it)*
 
+- **Revenus divers page** — Separate page to record misc income (donations, subsidies, ad-hoc tuition not flowing through enrollment). DB table `other_revenues`, migration 013, and all backend routes (`GET/POST/DELETE /api/finance/other-revenues`, `/api/finance/revenue-categories`) are fully built. Frontend page `OtherRevenuesPage.jsx` is built but pulled from nav/routing. Re-enabling = add import + route in `App.jsx` and nav item in `Layout.jsx`. *(Deferred: 2026-07-05, reason: polish other finance flows first)*
+
+- **Student photo upload** — Store a profile photo per student, displayed on the student detail page and optionally on report cards. Needs a storage strategy (local `data/photos/` directory like logos, served via a public route). Concerns: USB backup size, disk space on low-spec school machines. *(Deferred: 2026-07-05, reason: USB storage and disk space concerns on target hardware)*
+
 ---
 
-*Last updated: 2026-06-23*
+*Last updated: 2026-07-05*

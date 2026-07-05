@@ -107,24 +107,36 @@ router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
     const summary = getStudentFeeSummary(db, s.student_id, yearId, s.level_id)
     totalDue += summary.totalDue
     totalPaid += summary.totalPaid
-    if (summary.totalPaid === 0 && summary.totalDue > 0) overdueCount++
+    if (summary.totalPaid < summary.totalDue) overdueCount++
   }
 
   const totalCollected = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE academic_year_id = ? AND is_deleted = 0').get(yearId)?.total || 0
+  const totalOtherRevenues = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM other_revenues WHERE academic_year_id = ? AND is_deleted = 0').get(yearId)?.total || 0
   const totalExpenses = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE academic_year_id = ? AND is_deleted = 0').get(yearId)?.total || 0
-  const totalSalaries = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM salary_entries WHERE academic_year_id = ? AND is_paid = 1 AND is_deleted = 0').get(yearId)?.total || 0
+  const totalSalaries = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM salary_payments WHERE academic_year_id = ? AND is_deleted = 0').get(yearId)?.total || 0
 
   const monthlyRevenue = db.prepare(`
-    SELECT strftime('%Y-%m', payment_date) as month, SUM(amount) as total
-    FROM payments WHERE academic_year_id = ? AND is_deleted = 0
+    SELECT month, SUM(total) as total FROM (
+      SELECT strftime('%Y-%m', payment_date) as month, amount as total
+      FROM payments WHERE academic_year_id = ? AND is_deleted = 0
+      UNION ALL
+      SELECT strftime('%Y-%m', revenue_date) as month, amount as total
+      FROM other_revenues WHERE academic_year_id = ? AND is_deleted = 0
+    )
     GROUP BY month ORDER BY month
-  `).all(yearId)
+  `).all(yearId, yearId)
 
+  // Combine misc expenses + salary payments into one monthly outflow series
   const monthlyExpenses = db.prepare(`
-    SELECT strftime('%Y-%m', expense_date) as month, SUM(amount) as total
-    FROM expenses WHERE academic_year_id = ? AND is_deleted = 0
+    SELECT month, SUM(total) as total FROM (
+      SELECT strftime('%Y-%m', expense_date) as month, amount as total
+      FROM expenses WHERE academic_year_id = ? AND is_deleted = 0
+      UNION ALL
+      SELECT strftime('%Y-%m', created_at) as month, amount as total
+      FROM salary_payments WHERE academic_year_id = ? AND is_deleted = 0
+    )
     GROUP BY month ORDER BY month
-  `).all(yearId)
+  `).all(yearId, yearId)
 
   const classStats = db.prepare(`
     SELECT c.id, c.label, COUNT(e.id) as student_count,
@@ -144,10 +156,11 @@ router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
     total_students: students.length,
     total_due: totalDue,
     total_collected: totalCollected,
+    total_other_revenues: totalOtherRevenues,
     total_outstanding: totalDue - totalCollected,
     total_expenses: totalExpenses,
     total_salaries: totalSalaries,
-    net_balance: totalCollected - totalExpenses - totalSalaries,
+    net_balance: totalCollected + totalOtherRevenues - totalExpenses - totalSalaries,
     overdue_count: overdueCount,
     monthly_revenue: monthlyRevenue,
     monthly_expenses: monthlyExpenses,
@@ -538,12 +551,14 @@ router.get('/salaries', requirePermission('finance.view'), (req, res) => {
 
   const teachers = db.prepare('SELECT id, full_name, matricule, hourly_rate FROM teachers WHERE is_active = 1 AND is_deleted = 0 ORDER BY full_name').all()
 
-  const entries = db.prepare(`
-    SELECT se.* FROM salary_entries se
-    WHERE se.academic_year_id = ? AND se.month = ? AND se.is_deleted = 0
+  const monthlyPaid = db.prepare(`
+    SELECT teacher_id, SUM(amount) as total_paid
+    FROM salary_payments
+    WHERE academic_year_id = ? AND pay_period = ? AND is_deleted = 0
+    GROUP BY teacher_id
   `).all(yearId, targetMonth)
-  const entryMap = {}
-  entries.forEach(e => { entryMap[e.teacher_id] = e })
+  const paidMap = {}
+  monthlyPaid.forEach(p => { paidMap[p.teacher_id] = p.total_paid })
 
   const monthlyHours = db.prepare(`
     SELECT teacher_id, SUM(hours_credited) as total_hours
@@ -573,28 +588,30 @@ router.get('/salaries', requirePermission('finance.view'), (req, res) => {
   const rows = teachers.map(t => {
     const prevues = prevuesMap[t.id] || 0
     const reelles = hoursMap[t.id] || 0
-    const calculated = reelles * (t.hourly_rate || 0)
+    const totalPaid = paidMap[t.id] || 0
     return {
       ...t,
       hours_prevues: prevues,
       hours_reelles: reelles,
-      calculated_amount: calculated,
-      entry: entryMap[t.id] || null,
+      calculated_amount: reelles * (t.hourly_rate || 0),
+      total_paid: totalPaid,
     }
   })
 
-  const totalToVerse = rows.reduce((s, r) => s + r.calculated_amount, 0)
-  const totalVerse = rows.filter(r => r.entry?.is_paid).reduce((s, r) => s + (r.entry?.amount || 0), 0)
-  const paidCount = rows.filter(r => r.entry?.is_paid).length
+  const totalCalculated = rows.reduce((s, r) => s + r.calculated_amount, 0)
+  const totalVerse = rows.reduce((s, r) => s + r.total_paid, 0)
 
   return res.json({
     teachers: rows,
     month: targetMonth,
-    summary: { total_to_verse: totalToVerse, total_verse: totalVerse, reste: totalToVerse - totalVerse, paid_count: paidCount, total_count: rows.length },
+    summary: { total_calculated: totalCalculated, total_verse: totalVerse, total_count: rows.length },
   })
 })
 
-router.get('/salaries/preview/:teacherId', requirePermission('finance.view'), (req, res) => {
+// ─── SALARY — teacher detail (payments for a month) ─────────
+// NOTE: must be defined before /:teacherId to avoid route shadowing
+
+router.get('/salaries/:teacherId', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { teacherId } = req.params
@@ -604,78 +621,80 @@ router.get('/salaries/preview/:teacherId', requirePermission('finance.view'), (r
   const teacher = db.prepare('SELECT id, full_name, matricule, hourly_rate FROM teachers WHERE id = ? AND is_deleted = 0').get(teacherId)
   if (!teacher) return res.status(404).json({ error: 'NOT_FOUND' })
 
-  const weeklyH = db.prepare(`
+  const hours_prevues = db.prepare(`
     WITH RECURSIVE days(d) AS (
       SELECT date(? || '-01')
       UNION ALL SELECT date(d, '+1 day') FROM days WHERE d < date(? || '-01', '+1 month', '-1 day')
     )
-    SELECT SUM(CAST(substr(te.end_time, 1, 2) AS INTEGER) - CAST(substr(te.start_time, 1, 2) AS INTEGER)) AS hours_prevues
+    SELECT SUM(CAST(substr(te.end_time, 1, 2) AS INTEGER) - CAST(substr(te.start_time, 1, 2) AS INTEGER)) AS hp
     FROM days
     JOIN timetable_entries te ON te.day_of_week = CAST(strftime('%w', d) AS INTEGER)
       AND te.teacher_id = ? AND te.academic_year_id = ?
     WHERE CAST(strftime('%w', d) AS INTEGER) BETWEEN 1 AND 5
-  `).get(targetMonth, targetMonth, teacherId, yearId)?.hours_prevues || 0
+  `).get(targetMonth, targetMonth, teacherId, yearId)?.hp || 0
 
-  const monthlyLog = db.prepare(`
-    SELECT SUM(hours_credited) as total_hours,
-      SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) as days_present,
-      SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) as days_absent
+  const logRow = db.prepare(`
+    SELECT SUM(hours_credited) as total_hours
     FROM teacher_daily_log
     WHERE teacher_id = ? AND academic_year_id = ? AND strftime('%Y-%m', log_date) = ?
   `).get(teacherId, yearId, targetMonth)
+  const hours_reelles = logRow?.total_hours || 0
 
-  const hoursReelles = monthlyLog?.total_hours || 0
-  const calculated = hoursReelles * (teacher.hourly_rate || 0)
+  const payments = db.prepare(`
+    SELECT sp.*, u.full_name as recorded_by_name
+    FROM salary_payments sp
+    LEFT JOIN users u ON u.id = sp.recorded_by
+    WHERE sp.teacher_id = ? AND sp.academic_year_id = ? AND sp.pay_period = ? AND sp.is_deleted = 0
+    ORDER BY sp.created_at DESC
+  `).all(teacherId, yearId, targetMonth)
+
+  const total_paid = payments.reduce((s, p) => s + p.amount, 0)
 
   return res.json({
     teacher,
     month: targetMonth,
-    hours_prevues: weeklyH,
-    hours_reelles: hoursReelles,
-    days_present: monthlyLog?.days_present || 0,
-    days_absent: monthlyLog?.days_absent || 0,
-    hourly_rate: teacher.hourly_rate || 0,
-    calculated_amount: calculated,
+    hours_prevues,
+    hours_reelles,
+    calculated_amount: hours_reelles * (teacher.hourly_rate || 0),
+    total_paid,
+    payments,
   })
 })
 
-router.post('/salaries/pay', requirePermission('finance.edit'), (req, res) => {
+router.post('/salaries/:teacherId/pay', requirePermission('finance.edit'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
-  const { teacher_id, pay_period, amount, calculated_amount, adjustment_reason, payment_method, payer_name, reference } = req.body
+  const { teacherId } = req.params
+  const { pay_period, amount, payment_method, payer_name, reference, notes } = req.body
 
-  if (!teacher_id || !pay_period || !amount || amount <= 0) return res.status(400).json({ error: 'MISSING_FIELDS' })
+  if (!pay_period || !amount || parseFloat(amount) <= 0)
+    return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Mois et montant requis' })
 
-  const teacher = db.prepare('SELECT id, full_name, hourly_rate FROM teachers WHERE id = ? AND is_deleted = 0').get(teacher_id)
+  const teacher = db.prepare('SELECT id, full_name FROM teachers WHERE id = ? AND is_deleted = 0').get(teacherId)
   if (!teacher) return res.status(404).json({ error: 'NOT_FOUND' })
 
-  const existing = db.prepare('SELECT id FROM salary_entries WHERE teacher_id = ? AND academic_year_id = ? AND month = ? AND is_deleted = 0').get(teacher_id, yearId, pay_period)
-  if (existing) return res.status(409).json({ error: 'ALREADY_PAID', message: 'Salaire déjà enregistré pour ce mois' })
-
-  const monthlyHours = db.prepare(`
-    SELECT SUM(hours_credited) as total FROM teacher_daily_log
-    WHERE teacher_id = ? AND academic_year_id = ? AND strftime('%Y-%m', log_date) = ?
-  `).get(teacher_id, yearId, pay_period)?.total || 0
-
-  const needsReason = calculated_amount && Math.abs(parseFloat(amount) - parseFloat(calculated_amount)) > 0.01 && !adjustment_reason
-  if (needsReason) return res.status(400).json({ error: 'ADJUSTMENT_REASON_REQUIRED', message: 'Motif requis si le montant diffère du calculé' })
+  const uid = generateUUID()
+  const receipt = generateReceiptNumber(db, yearId, 'SAL')
+  let paymentId
 
   db.transaction(() => {
-    const receipt = generateReceiptNumber(db, yearId, 'SAL')
-    const uid = generateUUID()
+    db.prepare(`
+      INSERT INTO salary_payments
+        (payment_uid, teacher_id, academic_year_id, pay_period, amount, payment_method, receipt_number, payer_name, receiver_name, reference, notes, recorded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(uid, teacherId, yearId, pay_period, parseFloat(amount), payment_method || 'especes', receipt, payer_name || null, req.user?.fullName || null, reference || null, notes || null, req.user.id)
+
+    paymentId = db.prepare('SELECT last_insert_rowid() as id').get().id
 
     db.prepare(`
-      INSERT INTO salary_entries (salary_uid, teacher_id, academic_year_id, month, salary_type, total_hours, hourly_rate_snapshot, amount, is_paid, paid_at, payment_method, receipt_number, payer_name, receiver_name, reference, adjustment_reason, recorded_by)
-      VALUES (?, ?, ?, ?, 'hourly', ?, ?, ?, 1, datetime('now'), ?, ?, ?, ?, ?, ?, ?)
-    `).run(uid, teacher_id, yearId, pay_period, monthlyHours, teacher.hourly_rate || 0, parseFloat(amount), payment_method || 'especes', receipt, payer_name || null, teacher.full_name, reference || null, adjustment_reason || null, req.user.id)
-
-    db.prepare(`
-      INSERT INTO ledger_transactions (transaction_uid, type, source_type, source_id, academic_year_id, amount, description, transaction_date, created_by)
+      INSERT INTO ledger_transactions
+        (transaction_uid, type, source_type, source_id, academic_year_id, amount, description, transaction_date, created_by)
       VALUES (?, 'expense', 'salary', ?, ?, ?, ?, datetime('now'), ?)
-    `).run(generateUUID(), teacher_id, yearId, parseFloat(amount), `Salaire ${pay_period} - ${teacher.full_name}`, req.user.id)
+    `).run(generateUUID(), teacherId, yearId, parseFloat(amount), `Salaire ${pay_period} - ${teacher.full_name}`, req.user.id)
   })()
 
-  return res.json({ success: true })
+  const payment = db.prepare('SELECT * FROM salary_payments WHERE id = ?').get(paymentId)
+  return res.json({ success: true, payment })
 })
 
 // ─── EXPENSES ───────────────────────────────────────────────
@@ -685,29 +704,63 @@ router.get('/expenses', requirePermission('finance.view'), (req, res) => {
   const yearId = getYearId(db)
   const { month, category_id } = req.query
 
-  let query = `
-    SELECT e.*, ec.name as category_name, u.full_name as recorded_by_name
+  // Misc expenses
+  let expQuery = `
+    SELECT e.id, 'expense' as row_type, e.expense_date as date_col, ec.name as category_name,
+      e.category_id, e.description, e.amount, e.receipt_ref, u.full_name as recorded_by_name,
+      NULL as teacher_id, NULL as pay_period
     FROM expenses e
     LEFT JOIN expense_categories ec ON ec.id = e.category_id
     LEFT JOIN users u ON u.id = e.recorded_by
     WHERE e.academic_year_id = ? AND e.is_deleted = 0
   `
-  const params = [yearId]
-  if (month) { query += " AND strftime('%Y-%m', e.expense_date) = ?"; params.push(month) }
-  if (category_id) { query += ' AND e.category_id = ?'; params.push(category_id) }
-  query += ' ORDER BY e.expense_date DESC'
+  const expParams = [yearId]
+  if (month) { expQuery += " AND strftime('%Y-%m', e.expense_date) = ?"; expParams.push(month) }
+  // When filtering by a specific expense category, exclude salary rows entirely
+  const filterBySalary = category_id === 'salaires'
+  if (category_id && !filterBySalary) { expQuery += ' AND e.category_id = ?'; expParams.push(category_id) }
 
-  const expenses = db.prepare(query).all(...params)
+  const miscRows = filterBySalary ? [] : db.prepare(expQuery).all(...expParams)
+
+  // Salary payments — shown when no category filter OR when 'salaires' is selected
+  let salaryRows = []
+  if (!category_id || filterBySalary) {
+    let salQuery = `
+      SELECT sp.id, 'salary' as row_type, sp.created_at as date_col, 'Salaires' as category_name,
+        NULL as category_id, t.full_name as description, sp.amount, sp.receipt_number as receipt_ref,
+        u.full_name as recorded_by_name, sp.teacher_id, sp.pay_period
+      FROM salary_payments sp
+      JOIN teachers t ON t.id = sp.teacher_id
+      LEFT JOIN users u ON u.id = sp.recorded_by
+      WHERE sp.academic_year_id = ? AND sp.is_deleted = 0
+    `
+    const salParams = [yearId]
+    if (month) { salQuery += " AND strftime('%Y-%m', sp.created_at) = ?"; salParams.push(month) }
+    salQuery += ' ORDER BY sp.created_at DESC'
+    salaryRows = db.prepare(salQuery).all(...salParams)
+  }
+
+  const allRows = [...miscRows, ...salaryRows].sort((a, b) => (b.date_col || '').localeCompare(a.date_col || ''))
+
   const categories = db.prepare('SELECT * FROM expense_categories WHERE is_active = 1 ORDER BY name').all()
 
-  const totals = db.prepare(`
+  const miscTotals = db.prepare(`
     SELECT ec.name as category, SUM(e.amount) as total
     FROM expenses e JOIN expense_categories ec ON ec.id = e.category_id
     WHERE e.academic_year_id = ? AND e.is_deleted = 0
     GROUP BY ec.name ORDER BY total DESC
   `).all(yearId)
 
-  return res.json({ expenses, categories, totals })
+  const salaryTotal = db.prepare(
+    'SELECT COALESCE(SUM(amount), 0) as total FROM salary_payments WHERE academic_year_id = ? AND is_deleted = 0'
+  ).get(yearId)?.total || 0
+
+  const totals = [
+    ...miscTotals,
+    ...(salaryTotal > 0 ? [{ category: 'Salaires', total: salaryTotal }] : []),
+  ]
+
+  return res.json({ expenses: allRows, categories, totals })
 })
 
 router.get('/expenses/months', requirePermission('finance.view'), (req, res) => {
@@ -789,6 +842,103 @@ router.delete('/expense-categories/:id', requirePermission('finance.edit'), (req
   return res.json({ success: true })
 })
 
+// ─── OTHER REVENUES ─────────────────────────────────────────
+
+router.get('/other-revenues', requirePermission('finance.view'), (req, res) => {
+  const db = getDb()
+  const yearId = getYearId(db)
+  const { month, category_id } = req.query
+
+  let query = `
+    SELECT r.*, rc.name as category_name, u.full_name as recorded_by_name
+    FROM other_revenues r
+    JOIN revenue_categories rc ON rc.id = r.category_id
+    LEFT JOIN users u ON u.id = r.recorded_by
+    WHERE r.academic_year_id = ? AND r.is_deleted = 0
+  `
+  const params = [yearId]
+  if (month) { query += " AND strftime('%Y-%m', r.revenue_date) = ?"; params.push(month) }
+  if (category_id) { query += ' AND r.category_id = ?'; params.push(category_id) }
+  query += ' ORDER BY r.revenue_date DESC, r.created_at DESC'
+
+  const revenues = db.prepare(query).all(...params)
+  const categories = db.prepare('SELECT * FROM revenue_categories WHERE is_active = 1 ORDER BY name').all()
+
+  const totals = db.prepare(`
+    SELECT rc.name as category, SUM(r.amount) as total
+    FROM other_revenues r JOIN revenue_categories rc ON rc.id = r.category_id
+    WHERE r.academic_year_id = ? AND r.is_deleted = 0
+    GROUP BY rc.name ORDER BY total DESC
+  `).all(yearId)
+
+  return res.json({ revenues, categories, totals })
+})
+
+router.post('/other-revenues', requirePermission('finance.edit'), (req, res) => {
+  const db = getDb()
+  const yearId = getYearId(db)
+  const { category_id, description, amount, revenue_date, reference } = req.body
+
+  if (!category_id || !amount || parseFloat(amount) <= 0)
+    return res.status(400).json({ error: 'MISSING_FIELDS' })
+
+  const uid = generateUUID()
+  const dateVal = revenue_date || new Date().toISOString().slice(0, 10)
+
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO other_revenues (revenue_uid, category_id, academic_year_id, description, amount, revenue_date, reference, recorded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(uid, category_id, yearId, description || null, parseFloat(amount), dateVal, reference || null, req.user.id)
+
+    const revId = db.prepare('SELECT last_insert_rowid() as id').get().id
+    const catName = db.prepare('SELECT name FROM revenue_categories WHERE id = ?').get(category_id)?.name || ''
+
+    db.prepare(`
+      INSERT INTO ledger_transactions (transaction_uid, type, source_type, source_id, academic_year_id, amount, description, transaction_date, created_by)
+      VALUES (?, 'income', 'other_revenue', ?, ?, ?, ?, ?, ?)
+    `).run(generateUUID(), revId, yearId, parseFloat(amount), `${catName}${description ? ' - ' + description : ''}`, dateVal, req.user.id)
+  })()
+
+  return res.json({ success: true })
+})
+
+router.delete('/other-revenues/:id', requirePermission('finance.edit'), (req, res) => {
+  const db = getDb()
+  db.prepare("UPDATE other_revenues SET is_deleted = 1 WHERE id = ?").run(req.params.id)
+  return res.json({ success: true })
+})
+
+router.get('/revenue-categories', requirePermission('finance.view'), (req, res) => {
+  const db = getDb()
+  const categories = db.prepare('SELECT * FROM revenue_categories WHERE is_active = 1 ORDER BY name').all()
+  return res.json({ categories })
+})
+
+router.post('/revenue-categories', requirePermission('finance.edit'), (req, res) => {
+  const db = getDb()
+  const { name } = req.body
+  if (!name) return res.status(400).json({ error: 'MISSING_FIELDS' })
+  const existing = db.prepare('SELECT id FROM revenue_categories WHERE name = ?').get(name.trim())
+  if (existing) return res.status(409).json({ error: 'DUPLICATE' })
+  db.prepare('INSERT INTO revenue_categories (name) VALUES (?)').run(name.trim())
+  return res.json({ success: true })
+})
+
+router.delete('/revenue-categories/:id', requirePermission('finance.edit'), (req, res) => {
+  const db = getDb()
+  const cat = db.prepare('SELECT is_system FROM revenue_categories WHERE id = ?').get(req.params.id)
+  if (!cat) return res.status(404).json({ error: 'NOT_FOUND' })
+  if (cat.is_system) return res.status(403).json({ error: 'SYSTEM_CATEGORY' })
+  const used = db.prepare('SELECT COUNT(*) as cnt FROM other_revenues WHERE category_id = ? AND is_deleted = 0').get(req.params.id)?.cnt || 0
+  if (used > 0) {
+    db.prepare('UPDATE revenue_categories SET is_active = 0 WHERE id = ?').run(req.params.id)
+  } else {
+    db.prepare('DELETE FROM revenue_categories WHERE id = ?').run(req.params.id)
+  }
+  return res.json({ success: true })
+})
+
 // ─── RECEIPTS (print data) ─────────────────────────────────
 
 router.get('/receipt/payment/:id', requirePermission('finance.view'), (req, res) => {
@@ -814,12 +964,21 @@ router.get('/receipt/salary/:id', requirePermission('finance.view'), (req, res) 
   const db = getDb()
   const school = db.prepare('SELECT * FROM school_config LIMIT 1').get()
 
-  const entry = db.prepare(`
-    SELECT se.*, t.full_name as teacher_name, t.matricule as teacher_matricule, t.hourly_rate
-    FROM salary_entries se JOIN teachers t ON t.id = se.teacher_id WHERE se.id = ?
+  // Try salary_payments first (new system), fall back to salary_entries (legacy)
+  let entry = db.prepare(`
+    SELECT sp.*, t.full_name as teacher_name, t.matricule as teacher_matricule, t.hourly_rate,
+      sp.pay_period as month
+    FROM salary_payments sp JOIN teachers t ON t.id = sp.teacher_id WHERE sp.id = ?
   `).get(req.params.id)
-  if (!entry) return res.status(404).json({ error: 'NOT_FOUND' })
 
+  if (!entry) {
+    entry = db.prepare(`
+      SELECT se.*, t.full_name as teacher_name, t.matricule as teacher_matricule, t.hourly_rate
+      FROM salary_entries se JOIN teachers t ON t.id = se.teacher_id WHERE se.id = ?
+    `).get(req.params.id)
+  }
+
+  if (!entry) return res.status(404).json({ error: 'NOT_FOUND' })
   return res.json({ type: 'salary', school, data: entry })
 })
 

@@ -304,8 +304,8 @@ router.get('/:classroomId/:subjectId/:semester', requirePermission('grades.view'
     class_average: validAverages.length > 0 ? parseFloat((validAverages.reduce((a, b) => a + b, 0) / validAverages.length).toFixed(2)) : null,
     highest: validAverages.length > 0 ? Math.max(...validAverages) : null,
     lowest: validAverages.length > 0 ? Math.min(...validAverages) : null,
-    graded_count: rows.filter(r => r.graded > 0).length,
-    total_count: rows.length,
+    graded_count: rows.reduce((sum, r) => sum + r.graded, 0),
+    total_count: rows.reduce((sum, r) => sum + r.total_assessments, 0),
   }
 
   return res.json({ templates, rows, class_stats: classStats, coefficient, appreciation_scale: scale })
@@ -675,8 +675,12 @@ router.get('/dashboard/stats', requirePermission('students.view'), (req, res) =>
   // Grade entry progress per semester
   const semesters = []
   for (let s = 1; s <= periodeCount; s++) {
-    const totalTemplates = db.prepare(`
-      SELECT COUNT(*) as cnt FROM assessment_templates WHERE academic_year_id = ? AND semester = ?
+    // Expected = one score per (student in classroom × template for that classroom)
+    const totalExpected = db.prepare(`
+      SELECT COUNT(*) as cnt
+      FROM assessment_templates t
+      JOIN enrollments e ON e.classroom_id = t.classroom_id AND e.academic_year_id = t.academic_year_id AND e.is_deleted = 0
+      WHERE t.academic_year_id = ? AND t.semester = ?
     `).get(yearId || 0, s)?.cnt || 0
 
     const totalScores = db.prepare(`
@@ -685,7 +689,6 @@ router.get('/dashboard/stats', requirePermission('students.view'), (req, res) =>
       WHERE t.academic_year_id = ? AND t.semester = ? AND sc.is_deleted = 0 AND (sc.score IS NOT NULL OR sc.is_absent = 1)
     `).get(yearId || 0, s)?.cnt || 0
 
-    const totalExpected = totalTemplates * totalStudents
     const pct = totalExpected > 0 ? Math.round((totalScores / totalExpected) * 100) : 0
 
     const computed = db.prepare('SELECT COUNT(DISTINCT classroom_id) as cnt FROM semester_summaries WHERE academic_year_id = ? AND semester = ?').get(yearId || 0, s)?.cnt || 0

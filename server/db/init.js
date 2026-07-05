@@ -94,6 +94,14 @@ function runMigrations() {
         {
             version: '011_conduite_note',
             run: require('./migration/011_conduite_note').migration011
+        },
+        {
+            version: '012_salary_payments',
+            run: require('./migration/012_salary_payments').migration012
+        },
+        {
+            version: '013_other_revenues',
+            run: require('./migration/013_other_revenues').migration013
         }
     ]
 

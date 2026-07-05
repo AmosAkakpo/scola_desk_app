@@ -57,12 +57,13 @@ export default function FinanceDashboardPage() {
         <KPI label="Total attendu" value={formatXOF(data.total_due)} />
         <KPI label="Total encaissé" value={formatXOF(data.total_collected)} color="text-brand" sub={`${collectionPct}% collecté`} />
         <KPI label="Reste à percevoir" value={formatXOF(data.total_outstanding)} color={data.total_outstanding > 0 ? 'text-orange-600' : 'text-brand'} />
-        <KPI label="Élèves sans paiement" value={data.overdue_count} color={data.overdue_count > 0 ? 'text-red-600' : 'text-steel-900'} sub={`sur ${data.total_students} élèves`} />
+        <KPI label="Élèves non soldés" value={data.overdue_count} color={data.overdue_count > 0 ? 'text-red-600' : 'text-steel-900'} sub={`sur ${data.total_students} élèves`} />
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <KPI label="Revenus divers" value={formatXOF(data.total_other_revenues || 0)} color="text-brand" />
         <KPI label="Total dépenses" value={formatXOF(data.total_expenses)} color="text-red-600" />
-        <KPI label="Salaires versés" value={formatXOF(data.total_salaries)} />
+        <KPI label="Salaires versés" value={formatXOF(data.total_salaries)} color="text-red-600" />
         <KPI label="Solde net" value={formatXOF(data.net_balance)} color={data.net_balance >= 0 ? 'text-brand' : 'text-red-600'} />
       </div>
 
