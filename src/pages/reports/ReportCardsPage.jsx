@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
 
+function formatXOF(n) {
+  if (n === null || n === undefined) return '—'
+  return new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' F'
+}
+
 export default function ReportCardsPage() {
   const [classrooms, setClassrooms] = useState([])
   const [periodeCount, setPeriodeCount] = useState(3)
@@ -99,31 +104,60 @@ export default function ReportCardsPage() {
           <p className="text-steel-400 text-sm">Aucun bulletin généré. Cliquez sur "Générer les bulletins".</p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-steel-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-steel-200 bg-steel-50">
-                <th className="text-left px-4 py-3 text-steel-500 font-medium">Matricule</th>
-                <th className="text-left px-4 py-3 text-steel-500 font-medium">Nom complet</th>
-                <th className="text-left px-4 py-3 text-steel-500 font-medium">Généré le</th>
-                <th className="text-left px-4 py-3 text-steel-500 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshots.map(s => (
-                <tr key={s.id} className="border-b border-steel-100 hover:bg-steel-50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs text-brand-600">{s.matricule || '—'}</td>
-                  <td className="px-4 py-3 text-steel-800 font-medium">{s.full_name}</td>
-                  <td className="px-4 py-3 text-steel-500 text-xs">{s.generated_at ? new Date(s.generated_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => navigate(`/report-cards/${s.id}`)}
-                      className="text-xs text-brand hover:text-brand-600 font-medium">Voir / Imprimer</button>
-                  </td>
+        <>
+          {/* Payment awareness banner — informational, never blocks printing */}
+          {(() => {
+            const unpaid = snapshots.filter(s => (s.payment_remaining || 0) > 0)
+            if (unpaid.length === 0) return null
+            const total = unpaid.reduce((sum, s) => sum + s.payment_remaining, 0)
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-3">
+                <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-sm text-amber-800">
+                  {unpaid.length} élève(s) de cette classe ont un solde impayé (total : {formatXOF(total)}).
+                  L'impression reste possible — décision de l'école.
+                </p>
+              </div>
+            )
+          })()}
+          <div className="bg-white rounded-xl border border-steel-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-steel-200 bg-steel-50">
+                  <th className="text-left px-4 py-3 text-steel-500 font-medium">Matricule</th>
+                  <th className="text-left px-4 py-3 text-steel-500 font-medium">Nom complet</th>
+                  <th className="text-left px-4 py-3 text-steel-500 font-medium">Paiement</th>
+                  <th className="text-left px-4 py-3 text-steel-500 font-medium">Généré le</th>
+                  <th className="text-left px-4 py-3 text-steel-500 font-medium">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {snapshots.map(s => (
+                  <tr key={s.id} className="border-b border-steel-100 hover:bg-steel-50 transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-brand-600">{s.matricule || '—'}</td>
+                    <td className="px-4 py-3 text-steel-800 font-medium">{s.full_name}</td>
+                    <td className="px-4 py-3">
+                      {(s.payment_remaining || 0) > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700" title={`Solde impayé : ${formatXOF(s.payment_remaining)}`}>
+                          Impayé {formatXOF(s.payment_remaining)}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-brand-50 text-brand-600">Soldé</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-steel-500 text-xs">{s.generated_at ? new Date(s.generated_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                    <td className="px-4 py-3">
+                      <button onClick={() => navigate(`/report-cards/${s.id}`)}
+                        className="text-xs text-brand hover:text-brand-600 font-medium">Voir / Imprimer</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   )

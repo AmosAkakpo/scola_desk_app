@@ -207,11 +207,13 @@ export default function ReportCardViewPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [snapshot, setSnapshot] = useState(null)
+  const [paymentRemaining, setPaymentRemaining] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     api.get(`/api/report-cards/view/${id}`).then(res => {
       setSnapshot(res.data.snapshot)
+      setPaymentRemaining(res.data.payment_remaining || 0)
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [id])
@@ -231,6 +233,17 @@ export default function ReportCardViewPage() {
           Imprimer
         </button>
       </div>
+      {paymentRemaining > 0 && (
+        <div className="print:hidden max-w-[210mm] mx-auto mb-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
+          <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-sm text-amber-800">
+            Cet élève a un solde impayé de <strong>{new Intl.NumberFormat('fr-FR').format(Math.round(paymentRemaining))} F</strong>.
+            Vous pouvez quand même imprimer — la décision revient à l'école.
+          </p>
+        </div>
+      )}
       <BulletinContent d={snapshot} />
     </div>
   )

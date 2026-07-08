@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { getDb } = require('../db/init')
 const { generateUUID } = require('../utils/uid')
+const { getStudentFeeSummary } = require('../utils/fees')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
 
@@ -33,6 +34,14 @@ router.get('/list/:classroomId/:semester', requirePermission('reports.view'), (r
     WHERE rc.classroom_id = ? AND rc.academic_year_id = ? AND rc.semester = ?
     ORDER BY s.full_name
   `).all(req.params.classroomId, yearId, req.params.semester)
+
+  // Live payment status per student — informational only, never blocks printing.
+  // For STANDARD schools fee_types is empty → remaining 0 → no banner.
+  const levelId = db.prepare('SELECT level_id FROM classrooms WHERE id = ?').get(req.params.classroomId)?.level_id
+  for (const snap of snapshots) {
+    const summary = getStudentFeeSummary(db, snap.student_id, yearId, levelId)
+    snap.payment_remaining = summary.remaining
+  }
 
   return res.json({ snapshots })
 })
@@ -349,7 +358,11 @@ router.get('/view/:snapshotId', requirePermission('reports.view'), (req, res) =>
   let snapshot
   try { snapshot = JSON.parse(row.snapshot_data) } catch { return res.status(500).json({ error: 'PARSE_ERROR' }) }
 
-  return res.json({ snapshot, generated_at: row.generated_at })
+  // Live unpaid balance for the amber banner (screen only — excluded from print)
+  const levelId = db.prepare('SELECT level_id FROM classrooms WHERE id = ?').get(row.classroom_id)?.level_id
+  const summary = getStudentFeeSummary(db, row.student_id, row.academic_year_id, levelId)
+
+  return res.json({ snapshot, generated_at: row.generated_at, payment_remaining: summary.remaining })
 })
 
 module.exports = router
