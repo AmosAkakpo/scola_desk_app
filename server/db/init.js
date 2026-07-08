@@ -102,6 +102,10 @@ function runMigrations() {
         {
             version: '013_other_revenues',
             run: require('./migration/013_other_revenues').migration013
+        },
+        {
+            version: '014_salary_adjustment',
+            run: require('./migration/014_salary_adjustment').migration014
         }
     ]
 

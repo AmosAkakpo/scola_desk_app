@@ -39,6 +39,7 @@ export default function TeacherSalaryPage() {
 
   // Payment form
   const [amount, setAmount] = useState('')
+  const [adjustmentReason, setAdjustmentReason] = useState('')
   const [method, setMethod] = useState('especes')
   const [payerName, setPayerName] = useState('')
   const [reference, setReference] = useState('')
@@ -63,36 +64,57 @@ export default function TeacherSalaryPage() {
     setLoading(true)
     api.get(`/api/finance/salaries/${teacherId}?pay_period=${month}`).then(res => {
       setData(res.data)
+      // Pre-fill the amount with the calculated remaining for the month
+      const expected = Math.max(0, (res.data.calculated_amount || 0) - (res.data.total_paid || 0))
+      setAmount(prev => prev === '' && expected > 0 ? String(Math.round(expected)) : prev)
       setLoading(false)
     }).catch(() => setLoading(false))
   }
 
   useEffect(() => {
     setSearchParams({ pay_period: month }, { replace: true })
+    setAmount('') // reset so load() re-prefills for the new month
+    setAdjustmentReason('')
     load()
   }, [teacherId, month])
 
-  async function handlePay(e) {
-    e.preventDefault()
+  // Calculated remaining for the month — drives pre-fill + adjustment reason requirement
+  const expectedAmount = data ? Math.max(0, (data.calculated_amount || 0) - (data.total_paid || 0)) : 0
+  const needsReason = (data?.calculated_amount || 0) > 0
+    && parseFloat(amount) > 0
+    && Math.abs(parseFloat(amount) - expectedAmount) > 0.01
+
+  async function submitPay(andPrint) {
     const num = parseFloat(amount)
     if (!num || num <= 0) { setError('Montant invalide'); return }
+    if (needsReason && !adjustmentReason.trim()) {
+      setError(`Motif d'ajustement requis — le montant diffère du calculé restant (${formatXOF(expectedAmount)})`)
+      return
+    }
     setSaving(true); setError('')
     try {
       const res = await api.post(`/api/finance/salaries/${teacherId}/pay`, {
         pay_period: month,
         amount: num,
+        adjustment_reason: adjustmentReason.trim() || null,
         payment_method: method,
         payer_name: payerName || null,
         reference: reference || null,
         notes: notes || null,
       })
       setLastReceipt(res.data.payment)
-      setAmount(''); setPayerName(''); setReference(''); setNotes('')
+      setAmount(''); setAdjustmentReason(''); setPayerName(''); setReference(''); setNotes('')
       load()
+      if (andPrint) printPayment(res.data.payment.id)
     } catch (err) {
       setError(err.response?.data?.message || 'Erreur lors de l\'enregistrement')
     }
     setSaving(false)
+  }
+
+  async function handlePay(e) {
+    e.preventDefault()
+    await submitPay(false)
   }
 
   function printPayment(paymentId) {
@@ -165,6 +187,9 @@ export default function TeacherSalaryPage() {
                 className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand"
                 placeholder="Ex: 75 000"
               />
+              {expectedAmount > 0 && (
+                <p className="text-[10px] text-steel-400 mt-1">Calculé restant : {formatXOF(expectedAmount)}</p>
+              )}
             </div>
             <div>
               <label className="block text-xs text-steel-500 mb-1">Mode de paiement</label>
@@ -188,6 +213,14 @@ export default function TeacherSalaryPage() {
                 placeholder="N° transaction (optionnel)" />
             </div>
           </div>
+          {needsReason && (
+            <div>
+              <label className="block text-xs text-orange-600 mb-1">Motif d'ajustement * <span className="text-steel-400 font-normal">(montant différent du calculé)</span></label>
+              <input type="text" value={adjustmentReason} onChange={e => { setAdjustmentReason(e.target.value); setError('') }}
+                className="w-full px-3 py-2 border border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500"
+                placeholder="Ex: avance, retenue, prime..." />
+            </div>
+          )}
           <div>
             <label className="block text-xs text-steel-500 mb-1">Notes</label>
             <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
@@ -202,24 +235,7 @@ export default function TeacherSalaryPage() {
             </button>
             <button type="button" disabled={saving}
               className="flex-1 py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors"
-              onClick={async () => {
-                const num = parseFloat(amount)
-                if (!num || num <= 0) { setError('Montant invalide'); return }
-                setSaving(true); setError('')
-                try {
-                  const res = await api.post(`/api/finance/salaries/${teacherId}/pay`, {
-                    pay_period: month, amount: num, payment_method: method,
-                    payer_name: payerName || null, reference: reference || null, notes: notes || null,
-                  })
-                  setLastReceipt(res.data.payment)
-                  setAmount(''); setPayerName(''); setReference(''); setNotes('')
-                  load()
-                  printPayment(res.data.payment.id)
-                } catch (err) {
-                  setError(err.response?.data?.message || 'Erreur')
-                }
-                setSaving(false)
-              }}>
+              onClick={() => submitPay(true)}>
               {saving ? 'Enregistrement...' : 'Enregistrer et imprimer'}
             </button>
           </div>
@@ -259,6 +275,7 @@ export default function TeacherSalaryPage() {
                     {p.payer_name ? ` — ${p.payer_name}` : ''}
                     {p.reference ? ` — Réf: ${p.reference}` : ''}
                   </p>
+                  {p.adjustment_reason && <p className="text-[10px] text-orange-500">Ajusté : {p.adjustment_reason}</p>}
                   {p.notes && <p className="text-[10px] text-steel-400 italic">{p.notes}</p>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -356,6 +373,20 @@ function SalaryReceipt({ data }) {
             <tr>
               <td style={cellH}>Référence</td>
               <td style={cellV} colSpan={3}>{p.reference}</td>
+            </tr>
+          )}
+          {p.calculated_amount > 0 && (
+            <tr>
+              <td style={cellH}>Montant calculé</td>
+              <td style={cellV}>{fmtN(p.calculated_amount)}</td>
+              <td style={cellH}>Taux horaire</td>
+              <td style={cellV}>{p.hourly_rate ? fmtN(p.hourly_rate) + '/h' : '—'}</td>
+            </tr>
+          )}
+          {p.adjustment_reason && (
+            <tr>
+              <td style={cellH}>Motif ajustement</td>
+              <td style={cellV} colSpan={3}>{p.adjustment_reason}</td>
             </tr>
           )}
         </tbody>

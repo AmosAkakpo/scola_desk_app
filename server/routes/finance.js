@@ -667,13 +667,36 @@ router.post('/salaries/:teacherId/pay', requirePermission('finance.edit'), (req,
   const db = getDb()
   const yearId = getYearId(db)
   const { teacherId } = req.params
-  const { pay_period, amount, payment_method, payer_name, reference, notes } = req.body
+  const { pay_period, amount, payment_method, payer_name, reference, notes, adjustment_reason } = req.body
 
   if (!pay_period || !amount || parseFloat(amount) <= 0)
     return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Mois et montant requis' })
 
-  const teacher = db.prepare('SELECT id, full_name FROM teachers WHERE id = ? AND is_deleted = 0').get(teacherId)
+  const teacher = db.prepare('SELECT id, full_name, hourly_rate FROM teachers WHERE id = ? AND is_deleted = 0').get(teacherId)
   if (!teacher) return res.status(404).json({ error: 'NOT_FOUND' })
+
+  // Server-authoritative calculated amount for the month (hours × rate),
+  // snapshotted on the payment row. Adjustment reason is mandatory when the
+  // paid amount differs from the calculated REMAINING (multi-payment model).
+  const monthHours = db.prepare(`
+    SELECT COALESCE(SUM(hours_credited), 0) as h FROM teacher_daily_log
+    WHERE teacher_id = ? AND academic_year_id = ? AND strftime('%Y-%m', log_date) = ?
+  `).get(teacherId, yearId, pay_period)?.h || 0
+  const calculatedAmount = monthHours * (teacher.hourly_rate || 0)
+
+  const alreadyPaid = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) as t FROM salary_payments
+    WHERE teacher_id = ? AND academic_year_id = ? AND pay_period = ? AND is_deleted = 0
+  `).get(teacherId, yearId, pay_period)?.t || 0
+
+  const calculatedRemaining = Math.max(0, calculatedAmount - alreadyPaid)
+  const isAdjusted = calculatedAmount > 0 && Math.abs(parseFloat(amount) - calculatedRemaining) > 0.01
+  if (isAdjusted && !adjustment_reason?.trim()) {
+    return res.status(400).json({
+      error: 'ADJUSTMENT_REASON_REQUIRED',
+      message: `Motif d'ajustement requis (montant différent du calculé restant: ${Math.round(calculatedRemaining)} F)`,
+    })
+  }
 
   const uid = generateUUID()
   const receipt = generateReceiptNumber(db, yearId, 'SAL')
@@ -682,9 +705,9 @@ router.post('/salaries/:teacherId/pay', requirePermission('finance.edit'), (req,
   db.transaction(() => {
     db.prepare(`
       INSERT INTO salary_payments
-        (payment_uid, teacher_id, academic_year_id, pay_period, amount, payment_method, receipt_number, payer_name, receiver_name, reference, notes, recorded_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(uid, teacherId, yearId, pay_period, parseFloat(amount), payment_method || 'especes', receipt, payer_name || null, req.user?.fullName || null, reference || null, notes || null, req.user.id)
+        (payment_uid, teacher_id, academic_year_id, pay_period, amount, calculated_amount, adjustment_reason, payment_method, receipt_number, payer_name, receiver_name, reference, notes, recorded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(uid, teacherId, yearId, pay_period, parseFloat(amount), calculatedAmount, isAdjusted ? adjustment_reason.trim() : null, payment_method || 'especes', receipt, payer_name || null, req.user?.fullName || null, reference || null, notes || null, req.user.id)
 
     paymentId = db.prepare('SELECT last_insert_rowid() as id').get().id
 
