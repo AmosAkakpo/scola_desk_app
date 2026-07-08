@@ -512,9 +512,11 @@ router.post('/compute/:classroomId/:semester', requirePermission('grades.edit'),
   const classroom = db.prepare('SELECT level_id, serie_id FROM classrooms WHERE id = ? AND is_deleted = 0').get(classroomId)
   if (!classroom) return res.status(404).json({ error: 'NOT_FOUND' })
 
+  // Expelled students are excluded — keeps class_rank/class_size consistent
+  // with report card snapshots (which already exclude is_expelled)
   const students = db.prepare(`
     SELECT s.id AS student_id FROM students s
-    JOIN enrollments e ON e.student_id = s.id AND e.classroom_id = ? AND e.is_deleted = 0
+    JOIN enrollments e ON e.student_id = s.id AND e.classroom_id = ? AND e.is_deleted = 0 AND e.is_expelled = 0
     WHERE s.is_deleted = 0
   `).all(classroomId)
 
