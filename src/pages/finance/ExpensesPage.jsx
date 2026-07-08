@@ -7,22 +7,36 @@ function formatXOF(n) {
   return new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' F'
 }
 
+// 'YYYY-MM' → 'Sep 25', 'Jan 26'...
+function monthLabel(m) {
+  const [y, mo] = m.split('-').map(Number)
+  const label = new Date(y, mo - 1, 1).toLocaleDateString('fr-FR', { month: 'short' })
+  return `${label.charAt(0).toUpperCase()}${label.slice(1).replace('.', '')} ${String(y).slice(2)}`
+}
+
 export default function ExpensesPage() {
   const [data, setData] = useState(null)
+  const [months, setMonths] = useState([])
+  const [monthFilter, setMonthFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [catFilter, setCatFilter] = useState('')
   const navigate = useNavigate()
 
-  function load() {
+  function load(month = monthFilter) {
     setLoading(true)
-    api.get('/api/finance/expenses').then(res => {
-      setData(res.data)
+    const params = month ? `?month=${month}` : ''
+    Promise.all([
+      api.get(`/api/finance/expenses${params}`),
+      api.get('/api/finance/expenses/months'),
+    ]).then(([expRes, monthsRes]) => {
+      setData(expRes.data)
+      setMonths(monthsRes.data.months || [])
       setLoading(false)
     }).catch(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [monthFilter])
 
   // salary rows have row_type='salary' and no category_id; filter 'salaires' matches them
   const expenses = (data?.expenses || []).filter(e => {
@@ -45,6 +59,23 @@ export default function ExpensesPage() {
           </button>
         </div>
       </div>
+
+      {/* Month tabs */}
+      {months.length > 0 && (
+        <div className="flex gap-1.5 mb-4 flex-wrap">
+          <button onClick={() => setMonthFilter('')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${monthFilter === '' ? 'bg-brand text-white border-brand' : 'bg-white text-steel-600 border-steel-200 hover:border-brand hover:text-brand'}`}>
+            Tous
+          </button>
+          {months.map(m => (
+            <button key={m.month} onClick={() => setMonthFilter(m.month)}
+              title={`${m.count} entrée(s) — ${formatXOF(m.total)}`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${monthFilter === m.month ? 'bg-brand text-white border-brand' : 'bg-white text-steel-600 border-steel-200 hover:border-brand hover:text-brand'}`}>
+              {monthLabel(m.month)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Category totals */}
       {(data?.totals || []).length > 0 && (

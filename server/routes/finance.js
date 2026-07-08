@@ -792,11 +792,17 @@ router.get('/expenses/months', requirePermission('finance.view'), (req, res) => 
   const db = getDb()
   const yearId = getYearId(db)
 
+  // Months with data = misc expenses UNION salary payments (both shown on the page)
   const months = db.prepare(`
-    SELECT strftime('%Y-%m', expense_date) as month, SUM(amount) as total, COUNT(*) as count
-    FROM expenses WHERE academic_year_id = ? AND is_deleted = 0
+    SELECT month, SUM(total) as total, COUNT(*) as count FROM (
+      SELECT strftime('%Y-%m', expense_date) as month, amount as total
+      FROM expenses WHERE academic_year_id = ? AND is_deleted = 0
+      UNION ALL
+      SELECT strftime('%Y-%m', created_at) as month, amount as total
+      FROM salary_payments WHERE academic_year_id = ? AND is_deleted = 0
+    )
     GROUP BY month ORDER BY month
-  `).all(yearId)
+  `).all(yearId, yearId)
 
   return res.json({ months })
 })
