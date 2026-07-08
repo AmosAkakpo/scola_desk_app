@@ -926,6 +926,56 @@ router.delete('/revenue-categories/:id', requirePermission('finance.edit'), (req
   return res.json({ success: true })
 })
 
+// ─── RAPPORT FINANCIER (annual month-by-month report) ──────
+
+router.get('/report', requirePermission('finance.view'), (req, res) => {
+  const db = getDb()
+  const yearId = getYearId(db)
+  const year = yearId ? db.prepare('SELECT label, start_date, end_date FROM academic_years WHERE id = ?').get(yearId) : null
+  const school = db.prepare('SELECT school_name, city, country FROM school_config LIMIT 1').get()
+
+  const rows = {} // 'YYYY-MM' -> { tuition, other, expenses, salaries }
+  const add = (list, key) => list.forEach(r => {
+    if (!rows[r.month]) rows[r.month] = { tuition: 0, other: 0, expenses: 0, salaries: 0 }
+    rows[r.month][key] = r.total || 0
+  })
+
+  add(db.prepare(`
+    SELECT strftime('%Y-%m', payment_date) as month, SUM(amount) as total
+    FROM payments WHERE academic_year_id = ? AND is_deleted = 0 GROUP BY month
+  `).all(yearId), 'tuition')
+
+  add(db.prepare(`
+    SELECT strftime('%Y-%m', revenue_date) as month, SUM(amount) as total
+    FROM other_revenues WHERE academic_year_id = ? AND is_deleted = 0 GROUP BY month
+  `).all(yearId), 'other')
+
+  add(db.prepare(`
+    SELECT strftime('%Y-%m', expense_date) as month, SUM(amount) as total
+    FROM expenses WHERE academic_year_id = ? AND is_deleted = 0 GROUP BY month
+  `).all(yearId), 'expenses')
+
+  add(db.prepare(`
+    SELECT strftime('%Y-%m', created_at) as month, SUM(amount) as total
+    FROM salary_payments WHERE academic_year_id = ? AND is_deleted = 0 GROUP BY month
+  `).all(yearId), 'salaries')
+
+  const months = Object.keys(rows).sort().map(m => {
+    const r = rows[m]
+    return { month: m, ...r, solde: r.tuition + r.other - r.expenses - r.salaries }
+  })
+
+  const totals = months.reduce((acc, m) => ({
+    tuition: acc.tuition + m.tuition,
+    other: acc.other + m.other,
+    expenses: acc.expenses + m.expenses,
+    salaries: acc.salaries + m.salaries,
+    solde: acc.solde + m.solde,
+  }), { tuition: 0, other: 0, expenses: 0, salaries: 0, solde: 0 })
+
+  return res.json({ year_label: year?.label || '', school, months, totals })
+})
+
 // ─── RECEIPTS (print data) ─────────────────────────────────
 
 router.get('/receipt/payment/:id', requirePermission('finance.view'), (req, res) => {
