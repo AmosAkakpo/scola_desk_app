@@ -106,6 +106,10 @@ function runMigrations() {
         {
             version: '014_salary_adjustment',
             run: require('./migration/014_salary_adjustment').migration014
+        },
+        {
+            version: '015_sync_checkpoint',
+            run: require('./migration/015_sync_checkpoint').migration015
         }
     ]
 
