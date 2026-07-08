@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import ConfirmModal from '../../components/ConfirmModal'
 
 export default function TeacherDetailPage() {
   const { id } = useParams()
@@ -11,6 +12,10 @@ export default function TeacherDetailPage() {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({})
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false)
+  const [savingInfo, setSavingInfo] = useState(false)
+  const [showToggleConfirm, setShowToggleConfirm] = useState(false)
+  const [togglingActive, setTogglingActive] = useState(false)
 
   async function fetchData() {
     const res = await api.get(`/api/teachers/${id}`)
@@ -22,15 +27,25 @@ export default function TeacherDetailPage() {
 
   useEffect(() => { fetchData() }, [id])
 
-  async function saveEdit(e) {
-    e.preventDefault()
+  function requestSave(e) {
+    e?.preventDefault()
+    setShowSaveConfirm(true)
+  }
+
+  async function saveEdit() {
+    setSavingInfo(true)
     await api.put(`/api/teachers/${id}`, editForm)
+    setSavingInfo(false)
+    setShowSaveConfirm(false)
     setEditing(false)
     fetchData()
   }
 
   async function toggleActive() {
+    setTogglingActive(true)
     await api.patch(`/api/teachers/${id}/toggle-active`)
+    setTogglingActive(false)
+    setShowToggleConfirm(false)
     fetchData()
   }
 
@@ -55,7 +70,7 @@ export default function TeacherDetailPage() {
               </span>
             </div>
           </div>
-          <button onClick={toggleActive}
+          <button onClick={() => setShowToggleConfirm(true)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${teacher.is_active === 1 ? 'border-red-200 text-red-600 hover:bg-red-50' : 'border-brand-200 text-brand-600 hover:bg-brand-50'}`}>
             {teacher.is_active === 1 ? 'Désactiver' : 'Réactiver'}
           </button>
@@ -72,7 +87,7 @@ export default function TeacherDetailPage() {
           ) : (
             <div className="flex gap-2">
               <button onClick={() => setEditing(false)} className="text-xs text-steel-400">Annuler</button>
-              <button onClick={saveEdit} className="text-xs text-brand font-medium">Enregistrer</button>
+              <button onClick={requestSave} className="text-xs text-brand font-medium">Enregistrer</button>
             </div>
           )}
         </div>
@@ -87,7 +102,7 @@ export default function TeacherDetailPage() {
             <div><p className="text-steel-400 text-xs">Taux horaire</p><p className="text-steel-800">{teacher.hourly_rate ? new Intl.NumberFormat('fr-FR').format(teacher.hourly_rate) + ' F/h' : '—'}</p></div>
           </div>
         ) : (
-          <form onSubmit={saveEdit} className="grid grid-cols-3 gap-3">
+          <form onSubmit={requestSave} className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs text-steel-500 mb-1">Nom complet</label>
               <input type="text" value={editForm.full_name || ''} onChange={e => setEditForm(p => ({ ...p, full_name: e.target.value }))}
@@ -165,6 +180,41 @@ export default function TeacherDetailPage() {
             ))}
           </div>
         </section>
+      )}
+
+      {/* Save Confirmation Modal */}
+      {showSaveConfirm && (
+        <ConfirmModal
+          title="Modifier les informations"
+          message="Confirmer la modification des informations de cet enseignant."
+          saving={savingInfo}
+          onCancel={() => setShowSaveConfirm(false)}
+          onConfirm={saveEdit}
+        >
+          <div className="bg-steel-50 rounded-lg px-4 py-3 space-y-1">
+            <p className="font-medium text-steel-800">{editForm.full_name}</p>
+            <p className="text-xs text-steel-500">{editForm.phone || '—'} · {editForm.email || '—'}</p>
+          </div>
+        </ConfirmModal>
+      )}
+
+      {/* Toggle Active Confirmation Modal */}
+      {showToggleConfirm && (
+        <ConfirmModal
+          title={teacher.is_active === 1 ? 'Désactiver cet enseignant' : 'Réactiver cet enseignant'}
+          message={teacher.is_active === 1
+            ? 'Ses affectations resteront visibles mais il ne pourra plus être sélectionné pour de nouvelles classes.'
+            : 'Cet enseignant redeviendra sélectionnable pour les affectations et le suivi de salaire.'}
+          danger={teacher.is_active === 1}
+          confirmLabel={teacher.is_active === 1 ? 'Désactiver' : 'Réactiver'}
+          saving={togglingActive}
+          onCancel={() => setShowToggleConfirm(false)}
+          onConfirm={toggleActive}
+        >
+          <div className="bg-steel-50 rounded-lg px-4 py-3">
+            <p className="font-medium text-steel-800">{teacher.full_name}</p>
+          </div>
+        </ConfirmModal>
       )}
     </div>
   )
