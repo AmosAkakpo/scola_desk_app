@@ -23,6 +23,7 @@ function generateReceiptNumber(db, yearId, prefix) {
     if (attempts > 50) break
   } while (
     db.prepare('SELECT 1 FROM payments WHERE receipt_number = ? LIMIT 1').get(candidate) ||
+    db.prepare('SELECT 1 FROM salary_payments WHERE receipt_number = ? LIMIT 1').get(candidate) ||
     db.prepare('SELECT 1 FROM salary_entries WHERE receipt_number = ? LIMIT 1').get(candidate)
   )
   return candidate
