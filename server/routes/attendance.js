@@ -161,13 +161,17 @@ router.get('/monthly-summary', requirePermission('attendance.view'), (req, res) 
   const weeklyMap = {}
   weeklyHours.forEach(w => { weeklyMap[w.teacher_id] = w.weekly })
 
-  const salaryEntries = db.prepare(
-    'SELECT teacher_id, is_paid FROM salary_entries WHERE academic_year_id = ? AND month = ? AND is_deleted = 0'
-  ).all(yearId, targetMonth)
+  // Paid status from salary_payments (multi-payment model) — salary_entries is legacy
+  const salaryPaid = db.prepare(`
+    SELECT teacher_id, SUM(amount) as total_paid FROM salary_payments
+    WHERE academic_year_id = ? AND pay_period = ? AND is_deleted = 0
+    GROUP BY teacher_id
+  `).all(yearId, targetMonth)
   const salaryMap = {}
-  salaryEntries.forEach(s => { salaryMap[s.teacher_id] = s.is_paid })
+  salaryPaid.forEach(s => { salaryMap[s.teacher_id] = s.total_paid })
 
-  const rows = teachers.filter(t => weeklyMap[t.id] > 0).map(t => {
+  // Include teachers with timetable hours OR credited hours (substitutes have no slots)
+  const rows = teachers.filter(t => weeklyMap[t.id] > 0 || (logMap[t.id]?.total_hours || 0) > 0).map(t => {
     const log = logMap[t.id] || {}
     const prevues = (weeklyMap[t.id] || 0) * 4
     const reelles = log.total_hours || 0
@@ -178,7 +182,8 @@ router.get('/monthly-summary', requirePermission('attendance.view'), (req, res) 
       taux: prevues > 0 ? Math.round((reelles / prevues) * 100) : 0,
       days_present: log.days_present || 0,
       days_absent: log.days_absent || 0,
-      salary_paid: !!salaryMap[t.id],
+      total_paid: salaryMap[t.id] || 0,
+      salary_paid: (salaryMap[t.id] || 0) > 0,
     }
   })
 
