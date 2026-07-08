@@ -3,6 +3,7 @@ const router = express.Router()
 const { getDb } = require('../db/init')
 const { generateUUID, generateStudentUID, getSchoolPrefix } = require('../utils/uid')
 const { autoAssignMandatoryFees } = require('../utils/fees')
+const { migrateStudentGrades } = require('../utils/transfer')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
 
@@ -158,14 +159,19 @@ router.post('/:id/transfer', requirePermission('students.edit'), (req, res) => {
   if (!enrollment) return res.status(404).json({ error: 'NOT_ENROLLED' })
 
   const oldClassroom = enrollment.classroom_id
-  db.prepare('UPDATE enrollments SET classroom_id = ? WHERE id = ?').run(classroom_id, enrollment.id)
+  let migration = { moved: 0, unmatched: 0 }
+  db.transaction(() => {
+    db.prepare('UPDATE enrollments SET classroom_id = ? WHERE id = ?').run(classroom_id, enrollment.id)
+    // Move the student's grades/decisions to the new classroom's templates
+    migration = migrateStudentGrades(db, parseInt(req.params.id), oldClassroom, parseInt(classroom_id), parseInt(yearId))
+  })()
 
   db.prepare(`
     INSERT INTO audit_logs (user_id, action, entity_type, entity_id, old_values, new_values)
     VALUES (?, 'STUDENT_TRANSFERRED', 'student', ?, ?, ?)
-  `).run(req.user.id, req.params.id, JSON.stringify({ classroom_id: oldClassroom }), JSON.stringify({ classroom_id }))
+  `).run(req.user.id, req.params.id, JSON.stringify({ classroom_id: oldClassroom }), JSON.stringify({ classroom_id, grades_moved: migration.moved, grades_unmatched: migration.unmatched }))
 
-  return res.json({ success: true })
+  return res.json({ success: true, grades_moved: migration.moved, grades_unmatched: migration.unmatched })
 })
 
 // ─── POST /api/students/:id/guardians — Add guardian ────────

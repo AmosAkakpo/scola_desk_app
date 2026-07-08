@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { getDb } = require('../db/init')
 const { generateUUID } = require('../utils/uid')
+const { migrateStudentGrades } = require('../utils/transfer')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
 
@@ -177,9 +178,15 @@ router.post('/:id/bulk-transfer', requirePermission('students.edit'), (req, res)
 
   const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
   const stmt = db.prepare('UPDATE enrollments SET classroom_id = ? WHERE student_id = ? AND academic_year_id = ? AND is_deleted = 0')
+  const getOld = db.prepare('SELECT classroom_id FROM enrollments WHERE student_id = ? AND academic_year_id = ? AND is_deleted = 0')
 
   db.transaction(() => {
-    for (const sid of student_ids) stmt.run(target_classroom_id, sid, yearId)
+    for (const sid of student_ids) {
+      const oldClassroom = getOld.get(sid, yearId)?.classroom_id
+      stmt.run(target_classroom_id, sid, yearId)
+      // Move each student's grades/decisions to the target classroom's templates
+      migrateStudentGrades(db, parseInt(sid), oldClassroom, parseInt(target_classroom_id), parseInt(yearId))
+    }
   })()
 
   db.prepare(`
