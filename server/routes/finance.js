@@ -224,6 +224,7 @@ router.post('/fee-types', requirePermission('finance.edit'), (req, res) => {
 
 router.put('/fee-types/:id', requirePermission('finance.edit'), (req, res) => {
   const db = getDb()
+  const yearId = getYearId(db)
   const ft = db.prepare('SELECT id, is_system FROM fee_types WHERE id = ?').get(req.params.id)
   if (!ft) return res.status(404).json({ error: 'NOT_FOUND' })
 
