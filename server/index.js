@@ -37,6 +37,7 @@ app.use('/api/decisions', require('./routes/decisions'))
 app.use('/api/report-cards', require('./routes/reportcards'))
 app.use('/api/finance', require('./routes/finance'))
 app.use('/api/attendance', require('./routes/attendance'))
+app.use('/api/sync', require('./routes/sync'))
 
 // Global error handler — ensures every error response is JSON, not HTML
 app.use((err, req, res, next) => {
