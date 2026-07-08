@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import ConfirmModal from '../../components/ConfirmModal'
 
 const STATUS_LABELS = { active: 'Actif', graduated: 'Diplômé', transferred: 'Transféré', excluded: 'Exclu' }
 
@@ -41,6 +42,10 @@ export default function StudentDetailPage() {
   const [conduiteNote, setConduiteNote] = useState('')
   const [showConduiteConfirm, setShowConduiteConfirm] = useState(false)
   const [conduiteSaving, setConduiteSaving] = useState(false)
+  const [showSaveInfoConfirm, setShowSaveInfoConfirm] = useState(false)
+  const [savingInfo, setSavingInfo] = useState(false)
+  const [guardianToDelete, setGuardianToDelete] = useState(null)
+  const [deletingGuardian, setDeletingGuardian] = useState(false)
 
   async function fetchData() {
     const res = await api.get(`/api/students/${id}`)
@@ -53,15 +58,25 @@ export default function StudentDetailPage() {
 
   useEffect(() => { fetchData() }, [id])
 
-  async function saveEdit(e) {
-    e.preventDefault()
+  function requestSaveInfo(e) {
+    e?.preventDefault()
+    setShowSaveInfoConfirm(true)
+  }
+
+  async function saveEdit() {
+    setSavingInfo(true)
     await api.put(`/api/students/${id}`, editForm)
+    setSavingInfo(false)
+    setShowSaveInfoConfirm(false)
     setEditing(false)
     fetchData()
   }
 
   async function deleteGuardian(gid) {
+    setDeletingGuardian(true)
     await api.delete(`/api/students/${id}/guardians/${gid}`)
+    setDeletingGuardian(false)
+    setGuardianToDelete(null)
     fetchData()
   }
 
@@ -85,7 +100,6 @@ export default function StudentDetailPage() {
 
   async function saveConduite() {
     setConduiteSaving(true)
-    setShowConduiteConfirm(false)
     await api.put(`/api/students/${id}/sanctions/${sanctionSem}`, {
       avertissement: sanctions?.avertissement,
       blame: sanctions?.blame,
@@ -93,6 +107,7 @@ export default function StudentDetailPage() {
       conduite_note: conduiteNote || null,
     })
     setConduiteSaving(false)
+    setShowConduiteConfirm(false)
     loadSanctions(sanctionSem)
   }
 
@@ -141,7 +156,7 @@ export default function StudentDetailPage() {
           ) : (
             <div className="flex gap-2">
               <button onClick={() => setEditing(false)} className="text-xs text-steel-400">Annuler</button>
-              <button onClick={saveEdit} className="text-xs text-brand font-medium">Enregistrer</button>
+              <button onClick={requestSaveInfo} className="text-xs text-brand font-medium">Enregistrer</button>
             </div>
           )}
         </div>
@@ -155,7 +170,7 @@ export default function StudentDetailPage() {
             <div><p className="text-steel-400 text-xs">Inscrit le</p><p className="text-steel-800">{student.created_at ? new Date(student.created_at).toLocaleDateString('fr-FR') : '—'}</p></div>
           </div>
         ) : (
-          <form onSubmit={saveEdit} className="grid grid-cols-2 gap-3">
+          <form onSubmit={requestSaveInfo} className="grid grid-cols-2 gap-3">
             {[
               { field: 'full_name', label: 'Nom complet', type: 'text' },
               { field: 'birth_date', label: 'Date de naissance', type: 'date' },
@@ -195,7 +210,7 @@ export default function StudentDetailPage() {
                   <p className="text-sm text-steel-800 font-medium">{g.full_name} {g.is_primary === 1 && <span className="text-xs text-brand ml-1">Principal</span>}</p>
                   <p className="text-xs text-steel-500">{g.phone || '—'} {g.relationship && `· ${g.relationship}`}</p>
                 </div>
-                <button onClick={() => deleteGuardian(g.id)} className="text-xs text-red-400 hover:text-red-500">Retirer</button>
+                <button onClick={() => setGuardianToDelete(g)} className="text-xs text-red-400 hover:text-red-500">Retirer</button>
               </div>
             ))}
           </div>
@@ -352,21 +367,57 @@ export default function StudentDetailPage() {
 
       {/* Conduite Confirmation Modal */}
       {showConduiteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-base font-medium text-steel-900 mb-1">Modifier la conduite</h2>
-            <p className="text-sm text-steel-500 mb-4">Confirmer la modification de la note de conduite pour le Trimestre {sanctionSem}.</p>
-            <div className="bg-steel-50 rounded-lg px-4 py-3 mb-5 space-y-1">
-              <p className="font-medium text-steel-800">{student.full_name}</p>
-              <p className="text-xs text-steel-500">Conduite: <strong>{conduiteScore}/20</strong></p>
-              {conduiteNote && <p className="text-xs text-steel-500 italic">Note: {conduiteNote}</p>}
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setShowConduiteConfirm(false)} className="flex-1 py-2.5 border border-steel-200 text-steel-600 rounded-lg text-sm font-medium hover:bg-steel-50">Annuler</button>
-              <button onClick={saveConduite} className="flex-1 py-2.5 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium">Confirmer</button>
-            </div>
+        <ConfirmModal
+          title="Modifier la conduite"
+          message={`Confirmer la modification de la note de conduite pour le Trimestre ${sanctionSem}.`}
+          requireMatch={student.matricule}
+          saving={conduiteSaving}
+          onCancel={() => setShowConduiteConfirm(false)}
+          onConfirm={saveConduite}
+        >
+          <div className="bg-steel-50 rounded-lg px-4 py-3 space-y-1">
+            <p className="font-medium text-steel-800">{student.full_name}</p>
+            <p className="text-xs text-steel-500">Conduite: <strong>{conduiteScore}/20</strong></p>
+            {conduiteNote && <p className="text-xs text-steel-500 italic">Note: {conduiteNote}</p>}
           </div>
-        </div>
+        </ConfirmModal>
+      )}
+
+      {/* Save Personal Info Confirmation Modal */}
+      {showSaveInfoConfirm && (
+        <ConfirmModal
+          title="Modifier les informations"
+          message="Confirmer la modification des informations personnelles de l'élève."
+          requireMatch={student.matricule}
+          saving={savingInfo}
+          onCancel={() => setShowSaveInfoConfirm(false)}
+          onConfirm={saveEdit}
+        >
+          <div className="bg-steel-50 rounded-lg px-4 py-3 space-y-1">
+            <p className="font-medium text-steel-800">{editForm.full_name}</p>
+            <p className="text-xs text-steel-500">{editForm.birth_date || '—'} · {editForm.birth_place || '—'}</p>
+          </div>
+        </ConfirmModal>
+      )}
+
+      {/* Delete Guardian Confirmation Modal */}
+      {guardianToDelete && (
+        <ConfirmModal
+          title="Retirer le tuteur"
+          message="Cette action retirera définitivement ce tuteur de la fiche de l'élève."
+          requireMatch={student.matricule}
+          danger
+          confirmLabel="Retirer"
+          saving={deletingGuardian}
+          savingLabel="Suppression..."
+          onCancel={() => setGuardianToDelete(null)}
+          onConfirm={() => deleteGuardian(guardianToDelete.id)}
+        >
+          <div className="bg-steel-50 rounded-lg px-4 py-3 space-y-1">
+            <p className="font-medium text-steel-800">{guardianToDelete.full_name}</p>
+            <p className="text-xs text-steel-500">{guardianToDelete.phone || '—'} {guardianToDelete.relationship && `· ${guardianToDelete.relationship}`}</p>
+          </div>
+        </ConfirmModal>
       )}
 
       {/* Expel Confirmation Modal */}
