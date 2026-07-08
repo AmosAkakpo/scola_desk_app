@@ -102,11 +102,19 @@ router.post('/generate', requirePermission('reports.generate'), (req, res) => {
 
   let generated = 0
 
-  // For the last semester: pre-compute annual averages + annual rank for all students
+  // For the last semester: pre-compute annual averages + annual rank.
+  // Always computed over the WHOLE class (not the student_ids subset passed in),
+  // otherwise generating a single bulletin would yield annual rank 1/1.
   const annualAvgMap = {}
   const annualRankMap = {}
   if (parseInt(semester) === periodeCount) {
-    for (const student of students) {
+    const classStudents = db.prepare(`
+      SELECT s.id FROM students s
+      JOIN enrollments e ON e.student_id = s.id AND e.classroom_id = ? AND e.is_deleted = 0 AND e.is_expelled = 0
+      WHERE s.is_deleted = 0
+    `).all(classroom_id)
+
+    for (const student of classStudents) {
       const semAvgs = []
       for (let s = 1; s <= periodeCount; s++) {
         const ss = db.prepare('SELECT semester_average FROM semester_summaries WHERE student_id = ? AND classroom_id = ? AND academic_year_id = ? AND semester = ?')
@@ -117,8 +125,8 @@ router.post('/generate', requirePermission('reports.generate'), (req, res) => {
         ? parseFloat((semAvgs.reduce((a, b) => a + b, 0) / semAvgs.length).toFixed(2))
         : null
     }
-    // 1224 ranking on annual average
-    for (const student of students) {
+    // 1224 ranking on annual average, across the whole class
+    for (const student of classStudents) {
       const myAvg = annualAvgMap[student.id]
       if (myAvg === null) { annualRankMap[student.id] = null; continue }
       const rank = Object.values(annualAvgMap).filter(a => a !== null && a > myAvg).length + 1
