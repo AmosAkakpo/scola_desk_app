@@ -581,7 +581,7 @@ router.get('/salaries', requirePermission('finance.view'), (req, res) => {
     FROM days
     JOIN timetable_entries te ON te.day_of_week = CAST(strftime('%w', d) AS INTEGER)
       AND te.academic_year_id = ?
-    WHERE CAST(strftime('%w', d) AS INTEGER) BETWEEN 1 AND 5
+    WHERE CAST(strftime('%w', d) AS INTEGER) BETWEEN 1 AND 6
     GROUP BY te.teacher_id
   `).all(targetMonth, targetMonth, yearId)
   const prevuesMap = {}
@@ -632,7 +632,7 @@ router.get('/salaries/:teacherId', requirePermission('finance.view'), (req, res)
     FROM days
     JOIN timetable_entries te ON te.day_of_week = CAST(strftime('%w', d) AS INTEGER)
       AND te.teacher_id = ? AND te.academic_year_id = ?
-    WHERE CAST(strftime('%w', d) AS INTEGER) BETWEEN 1 AND 5
+    WHERE CAST(strftime('%w', d) AS INTEGER) BETWEEN 1 AND 6
   `).get(targetMonth, targetMonth, teacherId, yearId)?.hp || 0
 
   const logRow = db.prepare(`
