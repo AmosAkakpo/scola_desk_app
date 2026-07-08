@@ -68,7 +68,8 @@ export default function SubscriptionPage() {
   if (loading) return <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" /></div>
   if (!data) return <p className="text-steel-400 text-sm text-center py-12">Erreur de chargement</p>
 
-  const tierLabel = data.tier === 'pro' ? 'PRO' : 'STANDARD'
+  // license_state stores 'PRO'/'STANDARD' uppercase — compare case-insensitively
+  const tierLabel = (data.tier || '').toUpperCase() === 'PRO' ? 'PRO' : 'STANDARD'
 
   return (
     <div>
