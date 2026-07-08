@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import ConfirmModal from '../../components/ConfirmModal'
 
 export default function ClassroomDetailPage() {
   const { id } = useParams()
@@ -18,6 +19,8 @@ export default function ClassroomDetailPage() {
   const [showBulkMove, setShowBulkMove] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({})
+  const [pendingMove, setPendingMove] = useState(null)
+  const [movingStudent, setMovingStudent] = useState(false)
 
   async function fetchData() {
     const [detailRes, listRes, assignRes] = await Promise.all([
@@ -53,7 +56,10 @@ export default function ClassroomDetailPage() {
   }
 
   async function moveStudent(studentId, targetId) {
+    setMovingStudent(true)
     await api.post(`/api/students/${studentId}/transfer`, { classroom_id: targetId })
+    setMovingStudent(false)
+    setPendingMove(null)
     setSelected([])
     fetchData()
   }
@@ -166,7 +172,10 @@ export default function ClassroomDetailPage() {
                     </td>
                     <td className="px-4 py-3 text-steel-600">{s.gender || '—'}</td>
                     <td className="px-4 py-3">
-                      <MoveDropdown classrooms={allClassrooms} onMove={(targetId) => moveStudent(s.id, targetId)} />
+                      <MoveDropdown classrooms={allClassrooms} onMove={(targetId) => {
+                        const target = allClassrooms.find(c => c.id === targetId)
+                        setPendingMove({ studentId: s.id, studentName: s.full_name, targetId, targetLabel: target?.label || '—' })
+                      }} />
                     </td>
                   </tr>
                 ))}
@@ -274,6 +283,28 @@ export default function ClassroomDetailPage() {
           onMove={bulkMove}
         />
       )}
+
+      {/* Single Move Confirmation Modal */}
+      {pendingMove && (
+        <ConfirmModal
+          title="Déplacer l'élève"
+          message="Confirmer le changement de classe."
+          confirmLabel="Déplacer"
+          saving={movingStudent}
+          savingLabel="Déplacement..."
+          onCancel={() => setPendingMove(null)}
+          onConfirm={() => moveStudent(pendingMove.studentId, pendingMove.targetId)}
+        >
+          <div className="bg-steel-50 rounded-lg px-4 py-3 text-sm text-steel-700">
+            <p className="font-medium mb-1">{pendingMove.studentName}</p>
+            <p className="text-xs text-steel-500">
+              {classroom.label}
+              <span className="mx-2 text-steel-400">→</span>
+              <span className="font-medium text-steel-700">{pendingMove.targetLabel}</span>
+            </p>
+          </div>
+        </ConfirmModal>
+      )}
     </div>
   )
 }
@@ -315,13 +346,31 @@ function MoveDropdown({ classrooms, onMove }) {
 
 function BulkMoveModal({ count, classrooms, onClose, onMove }) {
   const [target, setTarget] = useState(classrooms[0]?.id || '')
+  const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  async function handleSubmit(e) {
+  function handleSubmit(e) {
     e.preventDefault()
     if (!target) return
-    setSaving(true)
-    await onMove(parseInt(target))
+    setConfirming(true)
+  }
+
+  if (confirming) {
+    const targetLabel = classrooms.find(c => String(c.id) === String(target))?.label || '—'
+    return (
+      <ConfirmModal
+        title={`Déplacer ${count} élève(s)`}
+        message={`Confirmer le déplacement vers ${targetLabel}.`}
+        confirmLabel="Déplacer"
+        saving={saving}
+        savingLabel="Déplacement..."
+        onCancel={() => setConfirming(false)}
+        onConfirm={async () => {
+          setSaving(true)
+          await onMove(parseInt(target))
+        }}
+      />
+    )
   }
 
   return (
@@ -338,8 +387,8 @@ function BulkMoveModal({ count, classrooms, onClose, onMove }) {
           </div>
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-steel-200 text-steel-600 rounded-lg text-sm font-medium hover:bg-steel-50">Annuler</button>
-            <button type="submit" disabled={saving || !target} className="flex-1 py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
-              {saving ? 'Déplacement...' : 'Déplacer'}
+            <button type="submit" disabled={!target} className="flex-1 py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
+              Continuer
             </button>
           </div>
         </form>
