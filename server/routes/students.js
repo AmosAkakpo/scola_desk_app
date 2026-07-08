@@ -119,9 +119,10 @@ router.post('/', requirePermission('students.edit'), (req, res) => {
 
   if (mode === 'custom' && !finalMatricule) {
     const schoolCode = db.prepare('SELECT school_code FROM school_config LIMIT 1').get()?.school_code || 'SCH'
-    const count = (db.prepare('SELECT COUNT(*) as cnt FROM students').get()?.cnt || 0) + 1
+    // MAX(id)+1, not COUNT(*)+1 — COUNT collides with the UNIQUE matricule after deletions
+    const seq = (db.prepare('SELECT MAX(id) as m FROM students').get()?.m || 0) + 1
     const year = new Date().getFullYear()
-    finalMatricule = `${schoolCode}/${year}/${String(count).padStart(4, '0')}`
+    finalMatricule = `${schoolCode}/${year}/${String(seq).padStart(4, '0')}`
   }
 
   const uid = generateStudentUID(getSchoolPrefix(db))
