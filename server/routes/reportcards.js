@@ -38,7 +38,8 @@ router.get('/list/:classroomId/:semester', requirePermission('reports.view'), (r
 })
 
 // ─── POST /api/report-cards/generate — Generate snapshots ───
-router.post('/generate', requirePermission('reports.edit'), (req, res) => {
+// Uses 'reports.generate' — the code actually seeded in migration 003 ('reports.edit' never existed)
+router.post('/generate', requirePermission('reports.generate'), (req, res) => {
   const db = getDb()
   const { classroom_id, semester, student_ids } = req.body
   if (!classroom_id || !semester) return res.status(400).json({ error: 'MISSING_FIELDS' })
