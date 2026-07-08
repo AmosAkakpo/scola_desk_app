@@ -8,6 +8,18 @@ const { autoAssignMandatoryFees } = require('../utils/fees')
 
 const TOTAL_STEPS = 13
 
+// Onboarding endpoints are intentionally unauthenticated (they run before any
+// user account exists), so they MUST be sealed once setup is finished —
+// otherwise anyone on the LAN could re-run steps or hard-delete class data.
+router.use((req, res, next) => {
+  const db = getDb()
+  const configured = db.prepare('SELECT is_configured FROM school_config LIMIT 1').get()?.is_configured === 1
+  if (configured) {
+    return res.status(403).json({ error: 'ONBOARDING_LOCKED', message: 'La configuration initiale est déjà terminée.' })
+  }
+  next()
+})
+
 function getCurrentStep() {
   const db = getDb()
   const row = db.prepare("SELECT value FROM app_settings WHERE key = 'onboarding_step'").get()

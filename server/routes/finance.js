@@ -3,14 +3,62 @@ const router = express.Router()
 const { getDb } = require('../db/init')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
+const { requirePro } = require('../middleware/requirePro')
 const { generateUUID } = require('../utils/uid')
 const { autoAssignMandatoryFees, getFeeAmountForStudent, getStudentFeeSummary } = require('../utils/fees')
-
-router.use(requireAuth)
 
 function getYearId(db) {
   return db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
 }
+
+// ─── SUBSCRIPTION INFO (Mon Abonnement) ────────────────────
+// Registered BEFORE requireAuth/requirePro on purpose: accessible to all
+// tiers and all roles, and must stay reachable from the expired-license
+// lock screen (Phase 8). Read-only license info — no sensitive data.
+
+function extractDeadlineMonth(val) {
+  if (!val) return null
+  const s = String(val).trim()
+  const dateMatch = s.match(/^(\d{4})-(\d{1,2})/)
+  if (dateMatch) return parseInt(dateMatch[2])
+  const n = parseInt(s)
+  return (n >= 1 && n <= 12) ? n : null
+}
+
+router.get('/subscription', (req, res) => {
+  const db = getDb()
+  const license = db.prepare('SELECT * FROM license_state LIMIT 1').get()
+  const actualStudents = db.prepare("SELECT COUNT(*) as cnt FROM students WHERE is_deleted = 0").get()?.cnt || 0
+  const settings = db.prepare("SELECT key, value FROM app_settings WHERE key IN ('semester_1_deadline', 'semester_2_deadline', 'semester_3_deadline')").all()
+  const deadlines = {}
+  settings.forEach(s => { deadlines[s.key] = s.value })
+
+  // Derive deadline date from current academic year's start year + stored month number
+  const ayId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
+  const ayLabel = ayId ? (db.prepare('SELECT label FROM academic_years WHERE id = ?').get(ayId)?.label || '') : ''
+  const startYear = ayLabel.split('-')[0]?.trim() || String(new Date().getFullYear())
+  const month1 = extractDeadlineMonth(deadlines.semester_1_deadline)
+  const first_deadline = (month1 && startYear)
+    ? `${startYear}-${String(month1).padStart(2, '0')}-01`
+    : null
+
+  return res.json({
+    rate_per_student: license?.rate_per_student || 0,
+    declared_student_count: license?.declared_student_count || 0,
+    paid_student_count: license?.paid_student_count || 0,
+    actual_student_count: actualStudents,
+    tier: license?.license_tier || 'standard',
+    expiry_date: license?.license_expiry || null,
+    amount_paid: license?.amount_paid || 0,
+    installation_fee: license?.installation_fee || 0,
+    installation_fee_paid: !!license?.installation_fee_paid,
+    first_deadline,
+  })
+})
+
+// Everything below: authenticated + PRO tier only (finance module gate)
+router.use(requireAuth)
+router.use(requirePro)
 
 function generateReceiptNumber(db, yearId, prefix) {
   const year = new Date().getFullYear()
@@ -226,48 +274,6 @@ router.delete('/fee-types/:id', requirePermission('finance.edit'), (req, res) =>
     db.prepare('DELETE FROM fee_types WHERE id = ?').run(req.params.id)
   }
   return res.json({ success: true })
-})
-
-// ─── SUBSCRIPTION INFO (Mon Abonnement) ────────────────────
-
-function extractDeadlineMonth(val) {
-  if (!val) return null
-  const s = String(val).trim()
-  const dateMatch = s.match(/^(\d{4})-(\d{1,2})/)
-  if (dateMatch) return parseInt(dateMatch[2])
-  const n = parseInt(s)
-  return (n >= 1 && n <= 12) ? n : null
-}
-
-router.get('/subscription', (req, res) => {
-  const db = getDb()
-  const license = db.prepare('SELECT * FROM license_state LIMIT 1').get()
-  const actualStudents = db.prepare("SELECT COUNT(*) as cnt FROM students WHERE is_deleted = 0").get()?.cnt || 0
-  const settings = db.prepare("SELECT key, value FROM app_settings WHERE key IN ('semester_1_deadline', 'semester_2_deadline', 'semester_3_deadline')").all()
-  const deadlines = {}
-  settings.forEach(s => { deadlines[s.key] = s.value })
-
-  // Derive deadline date from current academic year's start year + stored month number
-  const ayId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
-  const ayLabel = ayId ? (db.prepare('SELECT label FROM academic_years WHERE id = ?').get(ayId)?.label || '') : ''
-  const startYear = ayLabel.split('-')[0]?.trim() || String(new Date().getFullYear())
-  const month1 = extractDeadlineMonth(deadlines.semester_1_deadline)
-  const first_deadline = (month1 && startYear)
-    ? `${startYear}-${String(month1).padStart(2, '0')}-01`
-    : null
-
-  return res.json({
-    rate_per_student: license?.rate_per_student || 0,
-    declared_student_count: license?.declared_student_count || 0,
-    paid_student_count: license?.paid_student_count || 0,
-    actual_student_count: actualStudents,
-    tier: license?.license_tier || 'standard',
-    expiry_date: license?.license_expiry || null,
-    amount_paid: license?.amount_paid || 0,
-    installation_fee: license?.installation_fee || 0,
-    installation_fee_paid: !!license?.installation_fee_paid,
-    first_deadline,
-  })
 })
 
 // ─── TUITION — student list with fee summary ────────────────

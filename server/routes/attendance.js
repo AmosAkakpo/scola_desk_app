@@ -3,8 +3,10 @@ const router = express.Router()
 const { getDb } = require('../db/init')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
+const { requirePro } = require('../middleware/requirePro')
 
 router.use(requireAuth)
+router.use(requirePro) // teacher attendance is a PRO (finance module) feature
 
 function getYearId(db) {
   return db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value

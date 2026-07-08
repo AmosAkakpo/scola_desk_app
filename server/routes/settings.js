@@ -20,6 +20,16 @@ router.get('/school-logo', (req, res) => {
 
 router.use(requireAuth)
 
+// Paramètres are admin-only: reads stay open (pages need scale/config data),
+// but every mutation requires the admin role regardless of permission codes.
+router.use((req, res, next) => {
+  if (req.method === 'GET') return next()
+  if (req.user?.role_name !== 'admin') {
+    return res.status(403).json({ error: 'PERMISSION_DENIED', message: "Réservé à l'administrateur" })
+  }
+  next()
+})
+
 // ─── GET /api/settings — All settings ───────────────────────
 router.get('/', requirePermission('students.view'), (req, res) => {
   const db = getDb()
