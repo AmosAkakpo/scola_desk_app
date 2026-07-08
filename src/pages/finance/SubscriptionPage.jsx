@@ -10,10 +10,12 @@ function formatDate(d) {
   return new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-function SubscriptionTable({ title, subtitle, studentCount, rate, firstDeadline }) {
+// Simple expected-cost view: effectif × tarif. No payment state shown —
+// schools are offline most of the year, so any "déjà versé" figure from the
+// activation snapshot would be stale and misleading. Remittance is continuous
+// ("reversez au fur et à mesure des encaissements"), reconciled at year-end.
+function SubscriptionTable({ title, subtitle, studentCount, rate }) {
   const total = studentCount * rate
-  const seventyFive = Math.round(total * 0.75)
-  const remaining = total - seventyFive
 
   return (
     <div className="bg-white rounded-xl border border-steel-200 overflow-hidden">
@@ -29,24 +31,12 @@ function SubscriptionTable({ title, subtitle, studentCount, rate, firstDeadline 
               <td className="py-3 text-right font-semibold text-steel-800">{studentCount.toLocaleString('fr-FR')}</td>
             </tr>
             <tr className="border-b border-steel-100">
-              <td className="py-3 text-steel-600">Frais système informatique</td>
-              <td className="py-3 text-right text-steel-800">
-                {studentCount.toLocaleString('fr-FR')} × {formatXOF(rate)}
-                <span className="block text-sm font-semibold text-steel-900 mt-0.5">= {formatXOF(total)}</span>
-              </td>
-            </tr>
-            <tr className="border-b border-steel-100">
-              <td className="py-3 text-steel-600">
-                75% à payer avant la 1ère échéance
-                {firstDeadline && (
-                  <span className="block text-xs text-steel-400 mt-0.5">{formatDate(firstDeadline)}</span>
-                )}
-              </td>
-              <td className="py-3 text-right font-semibold text-orange-600">{formatXOF(seventyFive)}</td>
+              <td className="py-3 text-steel-600">Tarif par élève / an</td>
+              <td className="py-3 text-right text-steel-800">{formatXOF(rate)}</td>
             </tr>
             <tr>
-              <td className="py-3 text-steel-600">Restant à payer avant renouvellement</td>
-              <td className="py-3 text-right font-semibold text-steel-800">{formatXOF(remaining)}</td>
+              <td className="py-3 text-steel-600 font-medium">Coût total annuel</td>
+              <td className="py-3 text-right font-bold text-steel-900 text-base">{formatXOF(total)}</td>
             </tr>
           </tbody>
         </table>
@@ -70,6 +60,7 @@ export default function SubscriptionPage() {
 
   // license_state stores 'PRO'/'STANDARD' uppercase — compare case-insensitively
   const tierLabel = (data.tier || '').toUpperCase() === 'PRO' ? 'PRO' : 'STANDARD'
+  const diff = data.actual_student_count - data.declared_student_count
 
   return (
     <div>
@@ -94,10 +85,12 @@ export default function SubscriptionPage() {
           <p className="text-[10px] text-steel-400 uppercase tracking-wide">Expiration</p>
           <p className="text-sm font-semibold text-steel-800">{formatDate(data.expiry_date)}</p>
         </div>
-        {data.amount_paid > 0 && (
+        {diff !== 0 && (
           <div>
-            <p className="text-[10px] text-steel-400 uppercase tracking-wide">Déjà payé</p>
-            <p className="text-sm font-semibold text-brand">{formatXOF(data.amount_paid)}</p>
+            <p className="text-[10px] text-steel-400 uppercase tracking-wide">Écart d'effectif</p>
+            <p className={`text-sm font-semibold ${diff > 0 ? 'text-orange-600' : 'text-brand'}`}>
+              {diff > 0 ? '+' : ''}{diff} élève(s) vs déclaré
+            </p>
           </div>
         )}
       </div>
@@ -109,66 +102,25 @@ export default function SubscriptionPage() {
           subtitle="Nombre d'élèves déclaré lors de l'activation"
           studentCount={data.declared_student_count}
           rate={data.rate_per_student}
-          firstDeadline={data.first_deadline}
         />
         <SubscriptionTable
           title="Effectif actuel"
           subtitle="Nombre d'élèves actuellement inscrits dans le système"
           studentCount={data.actual_student_count}
           rate={data.rate_per_student}
-          firstDeadline={data.first_deadline}
         />
-      </div>
-
-      {/* Règlement — paid vs remaining (floor rule: MAX(actual, paid count) × rate) */}
-      <div className="mt-6 bg-white rounded-xl border border-steel-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-steel-200 bg-steel-50">
-          <h2 className="text-sm font-semibold text-steel-800">Règlement</h2>
-          <p className="text-xs text-steel-500 mt-0.5">Situation des paiements de l'abonnement</p>
-        </div>
-        <div className="p-5">
-          <table className="w-full text-sm">
-            <tbody>
-              <tr className="border-b border-steel-100">
-                <td className="py-3 text-steel-600">Montant déjà versé</td>
-                <td className="py-3 text-right font-semibold text-brand">{formatXOF(data.amount_paid)}</td>
-              </tr>
-              <tr className="border-b border-steel-100">
-                <td className="py-3 text-steel-600">
-                  Reste à régulariser <span className="text-xs text-steel-400">(indicatif)</span>
-                  <span className="block text-xs text-steel-400 mt-0.5">
-                    MAX(effectif réel, effectif payé) × tarif − déjà versé
-                  </span>
-                </td>
-                <td className="py-3 text-right font-semibold">
-                  {(() => {
-                    const owed = Math.max(data.actual_student_count, data.paid_student_count || 0) * data.rate_per_student
-                    const remaining = Math.max(0, owed - (data.amount_paid || 0))
-                    return <span className={remaining > 0 ? 'text-orange-600' : 'text-brand'}>{formatXOF(remaining)}</span>
-                  })()}
-                </td>
-              </tr>
-              {data.installation_fee > 0 && (
-                <tr>
-                  <td className="py-3 text-steel-600">Frais d'installation</td>
-                  <td className="py-3 text-right">
-                    <span className="font-semibold text-steel-800">{formatXOF(data.installation_fee)}</span>
-                    <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-medium ${data.installation_fee_paid ? 'bg-brand-50 text-brand-600' : 'bg-red-50 text-red-600'}`}>
-                      {data.installation_fee_paid ? 'Payé' : 'Non payé'}
-                    </span>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
 
       <div className="mt-6 bg-steel-50 rounded-xl border border-steel-200 p-4">
         <p className="text-xs text-steel-500">
-          Ces informations sont indicatives. Le montant final sera calculé lors de la synchronisation de fin d'année
-          en prenant en compte l'effectif réel et les paiements déjà effectués.
-          Règle : le montant dû = MAX(effectif réel, effectif payé) × tarif par élève.
+          Les frais de gestion sont à reverser à ScolaDesk au fur et à mesure des encaissements de scolarité —
+          regroupez les montants collectés et transmettez-les régulièrement.
+          Le décompte final est établi lors de la synchronisation de fin d'année :
+          montant dû = MAX(effectif réel, effectif payé) × tarif par élève.
+        </p>
+        <p className="text-xs text-steel-500 mt-2">
+          Astuce : enregistrez chaque versement à ScolaDesk dans <strong>Dépenses</strong> sous la catégorie
+          « Abonnement ScolaDesk » pour suivre localement ce que vous avez déjà réglé.
         </p>
         <p className="text-xs text-steel-500 mt-2">
           Pour toute question sur votre abonnement, un renouvellement ou une régularisation,
