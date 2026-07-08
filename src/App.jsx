@@ -24,6 +24,7 @@ import StudentReceiptPage from './pages/finance/StudentReceiptPage'
 import SalariesPage from './pages/finance/SalariesPage'
 import TeacherSalaryPage from './pages/finance/TeacherSalaryPage'
 import ExpensesPage from './pages/finance/ExpensesPage'
+import FinanceReportPage from './pages/finance/FinanceReportPage'
 import FinanceSettingsPage from './pages/finance/FinanceSettingsPage'
 import SubscriptionPage from './pages/finance/SubscriptionPage'
 import AttendancePage from './pages/finance/AttendancePage'
@@ -122,6 +123,7 @@ function ProtectedApp({ schoolInfo }) {
           <Route path="/finance/salaries" element={<SalariesPage />} />
           <Route path="/finance/salaries/:teacherId" element={<TeacherSalaryPage />} />
 <Route path="/finance/expenses" element={<ExpensesPage />} />
+          <Route path="/finance/report" element={<FinanceReportPage />} />
           <Route path="/finance/settings" element={<FinanceSettingsPage />} />
           <Route path="/finance/subscription" element={<SubscriptionPage />} />
           <Route path="/finance/attendance" element={<AttendancePage />} />
