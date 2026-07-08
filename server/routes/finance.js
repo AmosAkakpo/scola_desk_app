@@ -94,7 +94,7 @@ router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
   const yearId = getYearId(db)
 
   const students = db.prepare(`
-    SELECT s.id as student_id, c.level_id
+    SELECT s.id as student_id, c.level_id, e.classroom_id
     FROM students s
     JOIN enrollments e ON e.student_id = s.id AND e.academic_year_id = ? AND e.is_deleted = 0
     JOIN classrooms c ON c.id = e.classroom_id
@@ -104,11 +104,16 @@ router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
   let totalDue = 0
   let totalPaid = 0
   let overdueCount = 0
+  const classAgg = {} // classroom_id -> { due, paid, count } — real per-class figures
   for (const s of students) {
     const summary = getStudentFeeSummary(db, s.student_id, yearId, s.level_id)
     totalDue += summary.totalDue
     totalPaid += summary.totalPaid
     if (summary.totalPaid < summary.totalDue) overdueCount++
+    const agg = classAgg[s.classroom_id] || (classAgg[s.classroom_id] = { due: 0, paid: 0, count: 0 })
+    agg.due += summary.totalDue
+    agg.paid += summary.totalPaid
+    agg.count++
   }
 
   const totalCollected = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE academic_year_id = ? AND is_deleted = 0').get(yearId)?.total || 0
@@ -139,19 +144,24 @@ router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
     GROUP BY month ORDER BY month
   `).all(yearId, yearId)
 
-  const classStats = db.prepare(`
-    SELECT c.id, c.label, COUNT(e.id) as student_count,
-      COALESCE(SUM(paid.total_paid), 0) as collected
-    FROM classrooms c
-    JOIN enrollments e ON e.classroom_id = c.id AND e.is_deleted = 0
-    LEFT JOIN (
-      SELECT p.student_id, SUM(p.amount) as total_paid
-      FROM payments p WHERE p.academic_year_id = ? AND p.is_deleted = 0
-      GROUP BY p.student_id
-    ) paid ON paid.student_id = e.student_id
-    WHERE c.academic_year_id = ? AND c.is_deleted = 0
-    GROUP BY c.id ORDER BY c.label
-  `).all(yearId, yearId)
+  // Real per-class collection: dues/paid aggregated per classroom from the
+  // same live fee summaries as the global KPIs (no proration approximation)
+  const classrooms = db.prepare(
+    'SELECT id, label FROM classrooms WHERE academic_year_id = ? AND is_deleted = 0 ORDER BY label'
+  ).all(yearId)
+  const classStats = classrooms
+    .map(c => {
+      const agg = classAgg[c.id] || { due: 0, paid: 0, count: 0 }
+      return {
+        id: c.id,
+        label: c.label,
+        student_count: agg.count,
+        expected: agg.due,
+        collected: agg.paid,
+        rate: agg.due > 0 ? Math.round((agg.paid / agg.due) * 100) : 0,
+      }
+    })
+    .filter(c => c.student_count > 0)
 
   return res.json({
     total_students: students.length,
@@ -304,6 +314,7 @@ router.get('/subscription', (req, res) => {
   return res.json({
     rate_per_student: license?.rate_per_student || 0,
     declared_student_count: license?.declared_student_count || 0,
+    paid_student_count: license?.paid_student_count || 0,
     actual_student_count: actualStudents,
     tier: license?.license_tier || 'standard',
     expiry_date: license?.license_expiry || null,

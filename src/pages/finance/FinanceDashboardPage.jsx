@@ -47,6 +47,7 @@ export default function FinanceDashboardPage() {
         </div>
         <div className="flex gap-2">
           <button onClick={() => navigate('/finance/tuition')} className="px-3 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors">Paiements scolarité</button>
+          <button onClick={() => navigate('/finance/salaries')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Salaires</button>
           <button onClick={() => navigate('/finance/expenses')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Dépenses</button>
 <button onClick={() => navigate('/finance/subscription')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Mon abonnement</button>
         </div>
@@ -97,26 +98,23 @@ export default function FinanceDashboardPage() {
               <tr className="border-b border-steel-200">
                 <th className="text-left px-4 py-2.5 text-steel-500 font-medium">Classe</th>
                 <th className="text-center px-4 py-2.5 text-steel-500 font-medium">Élèves</th>
+                <th className="text-right px-4 py-2.5 text-steel-500 font-medium">Attendu</th>
                 <th className="text-right px-4 py-2.5 text-steel-500 font-medium">Encaissé</th>
                 <th className="text-right px-4 py-2.5 text-steel-500 font-medium">Taux</th>
               </tr>
             </thead>
             <tbody>
-              {data.class_stats.map(c => {
-                const pct = c.student_count > 0 && data.total_due > 0
-                  ? Math.round((c.collected / (data.total_due / data.total_students * c.student_count)) * 100)
-                  : 0
-                return (
-                  <tr key={c.id} className="border-b border-steel-50">
-                    <td className="px-4 py-2 text-steel-800 font-medium">{c.label}</td>
-                    <td className="px-4 py-2 text-center text-steel-600">{c.student_count}</td>
-                    <td className="px-4 py-2 text-right text-steel-800">{formatXOF(c.collected)}</td>
-                    <td className="px-4 py-2 text-right">
-                      <span className={`font-medium ${pct >= 75 ? 'text-brand' : pct >= 50 ? 'text-orange-600' : 'text-red-600'}`}>{pct}%</span>
-                    </td>
-                  </tr>
-                )
-              })}
+              {data.class_stats.map(c => (
+                <tr key={c.id} className="border-b border-steel-50">
+                  <td className="px-4 py-2 text-steel-800 font-medium">{c.label}</td>
+                  <td className="px-4 py-2 text-center text-steel-600">{c.student_count}</td>
+                  <td className="px-4 py-2 text-right text-steel-600">{formatXOF(c.expected)}</td>
+                  <td className="px-4 py-2 text-right text-steel-800">{formatXOF(c.collected)}</td>
+                  <td className="px-4 py-2 text-right">
+                    <span className={`font-medium ${c.rate >= 75 ? 'text-brand' : c.rate >= 50 ? 'text-orange-600' : 'text-red-600'}`}>{c.rate}%</span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

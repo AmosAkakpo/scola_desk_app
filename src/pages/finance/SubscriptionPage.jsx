@@ -120,11 +120,59 @@ export default function SubscriptionPage() {
         />
       </div>
 
+      {/* Règlement — paid vs remaining (floor rule: MAX(actual, paid count) × rate) */}
+      <div className="mt-6 bg-white rounded-xl border border-steel-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-steel-200 bg-steel-50">
+          <h2 className="text-sm font-semibold text-steel-800">Règlement</h2>
+          <p className="text-xs text-steel-500 mt-0.5">Situation des paiements de l'abonnement</p>
+        </div>
+        <div className="p-5">
+          <table className="w-full text-sm">
+            <tbody>
+              <tr className="border-b border-steel-100">
+                <td className="py-3 text-steel-600">Montant déjà versé</td>
+                <td className="py-3 text-right font-semibold text-brand">{formatXOF(data.amount_paid)}</td>
+              </tr>
+              <tr className="border-b border-steel-100">
+                <td className="py-3 text-steel-600">
+                  Reste à régulariser <span className="text-xs text-steel-400">(indicatif)</span>
+                  <span className="block text-xs text-steel-400 mt-0.5">
+                    MAX(effectif réel, effectif payé) × tarif − déjà versé
+                  </span>
+                </td>
+                <td className="py-3 text-right font-semibold">
+                  {(() => {
+                    const owed = Math.max(data.actual_student_count, data.paid_student_count || 0) * data.rate_per_student
+                    const remaining = Math.max(0, owed - (data.amount_paid || 0))
+                    return <span className={remaining > 0 ? 'text-orange-600' : 'text-brand'}>{formatXOF(remaining)}</span>
+                  })()}
+                </td>
+              </tr>
+              {data.installation_fee > 0 && (
+                <tr>
+                  <td className="py-3 text-steel-600">Frais d'installation</td>
+                  <td className="py-3 text-right">
+                    <span className="font-semibold text-steel-800">{formatXOF(data.installation_fee)}</span>
+                    <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-medium ${data.installation_fee_paid ? 'bg-brand-50 text-brand-600' : 'bg-red-50 text-red-600'}`}>
+                      {data.installation_fee_paid ? 'Payé' : 'Non payé'}
+                    </span>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="mt-6 bg-steel-50 rounded-xl border border-steel-200 p-4">
         <p className="text-xs text-steel-500">
           Ces informations sont indicatives. Le montant final sera calculé lors de la synchronisation de fin d'année
           en prenant en compte l'effectif réel et les paiements déjà effectués.
           Règle : le montant dû = MAX(effectif réel, effectif payé) × tarif par élève.
+        </p>
+        <p className="text-xs text-steel-500 mt-2">
+          Pour toute question sur votre abonnement, un renouvellement ou une régularisation,
+          contactez votre représentant ScolaDesk.
         </p>
       </div>
     </div>
