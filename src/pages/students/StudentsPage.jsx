@@ -15,6 +15,7 @@ export default function StudentsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [generatingSummary, setGeneratingSummary] = useState(false)
   const navigate = useNavigate()
 
   const fetchStudents = useCallback(async () => {
@@ -34,6 +35,92 @@ export default function StudentsPage() {
     api.get('/api/onboarding/levels').then(r => setLevels((r.data.levels || []).filter(l => l.is_active === 1))).catch(() => {})
   }, [fetchStudents])
 
+  async function downloadSummaryPdf() {
+    setGeneratingSummary(true)
+    try {
+      const [{ jsPDF }, { default: QRCode }, res] = await Promise.all([
+        import('jspdf'),
+        import('qrcode'),
+        api.get('/api/students/summary'),
+      ])
+      const data = res.data
+      const printedAt = new Date()
+
+      const breakdown = Object.entries(data.by_status || {}).map(([status, count]) => ({
+        label: STATUS_LABELS[status] || status, count,
+      }))
+
+      // Tamper check: scanning the QR reveals the original counts + print
+      // timestamp, so a hand-altered number on the printed page won't match.
+      const qrPayload = JSON.stringify({
+        school: data.school_name,
+        year: data.academic_year_label,
+        printed_at: printedAt.toISOString(),
+        total: data.total,
+        by_status: data.by_status,
+      })
+      const qrDataUrl = await QRCode.toDataURL(qrPayload, { margin: 1, width: 300 })
+
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      const W = 210
+      let y = 22
+
+      doc.setFontSize(16)
+      doc.setFont(undefined, 'bold')
+      doc.text(data.school_name || 'Établissement scolaire', W / 2, y, { align: 'center' })
+      y += 9
+
+      doc.setFontSize(13)
+      doc.text('Résumé des effectifs', W / 2, y, { align: 'center' })
+      y += 12
+
+      doc.setFontSize(10)
+      doc.setFont(undefined, 'normal')
+      doc.text(`Année scolaire : ${data.academic_year_label || '—'}`, 20, y)
+      y += 6
+      doc.text(`Date d'impression : ${printedAt.toLocaleString('fr-FR')}`, 20, y)
+      y += 14
+
+      doc.setFont(undefined, 'bold')
+      doc.setFontSize(11)
+      doc.text('Statut', 20, y)
+      doc.text('Nombre', 150, y, { align: 'right' })
+      y += 2
+      doc.line(20, y, W - 20, y)
+      y += 7
+
+      doc.setFont(undefined, 'normal')
+      breakdown.forEach(row => {
+        doc.text(row.label, 20, y)
+        doc.text(String(row.count), 150, y, { align: 'right' })
+        y += 7
+      })
+
+      y += 1
+      doc.line(20, y, W - 20, y)
+      y += 8
+      doc.setFont(undefined, 'bold')
+      doc.text('Total', 20, y)
+      doc.text(String(data.total), 150, y, { align: 'right' })
+      y += 18
+
+      const qrSize = 35
+      doc.addImage(qrDataUrl, 'PNG', 20, y, qrSize, qrSize)
+      doc.setFont(undefined, 'normal')
+      doc.setFontSize(8)
+      doc.text(
+        "Scannez pour vérifier les chiffres et la date d'impression de ce document.",
+        20 + qrSize + 6, y + qrSize / 2, { maxWidth: W - 20 - qrSize - 26 }
+      )
+
+      const yearSlug = (data.academic_year_label || 'annee').replace(/[^a-z0-9]/gi, '_')
+      doc.save(`Resume_effectifs_${yearSlug}.pdf`)
+    } catch (err) {
+      console.error('Summary PDF error', err)
+    }
+    setGeneratingSummary(false)
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -41,13 +128,22 @@ export default function StudentsPage() {
           <h1 className="text-xl font-medium text-steel-900">Élèves</h1>
           <p className="text-sm text-steel-500 mt-0.5">{students.length} élève(s) enregistré(s)</p>
         </div>
-        <button onClick={() => setShowAdd(true)}
-          className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Ajouter un élève
-        </button>
+        <div className="flex gap-2">
+          <button onClick={downloadSummaryPdf} disabled={generatingSummary}
+            className="px-4 py-2 border border-steel-200 text-steel-600 hover:bg-steel-50 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            {generatingSummary ? 'Génération...' : 'Résumé des effectifs (PDF)'}
+          </button>
+          <button onClick={() => setShowAdd(true)}
+            className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Ajouter un élève
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

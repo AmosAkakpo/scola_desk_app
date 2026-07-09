@@ -38,6 +38,34 @@ router.get('/', requirePermission('students.view'), (req, res) => {
   return res.json({ students: db.prepare(query).all(...params) })
 })
 
+// ─── GET /api/students/summary — Effectifs by status (current year) ─
+// Registered before /:id so Express doesn't treat "summary" as an id.
+router.get('/summary', requirePermission('students.view'), (req, res) => {
+  const db = getDb()
+  const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
+  const yearLabel = yearId ? db.prepare('SELECT label FROM academic_years WHERE id = ?').get(yearId)?.label : null
+  const schoolName = db.prepare('SELECT school_name FROM school_config LIMIT 1').get()?.school_name
+
+  const rows = db.prepare(`
+    SELECT s.status, COUNT(*) as cnt
+    FROM students s
+    JOIN enrollments e ON e.student_id = s.id AND e.academic_year_id = ? AND e.is_deleted = 0
+    WHERE s.is_deleted = 0
+    GROUP BY s.status
+  `).all(yearId || 0)
+
+  const byStatus = {}
+  let total = 0
+  for (const r of rows) { byStatus[r.status] = r.cnt; total += r.cnt }
+
+  return res.json({
+    school_name: schoolName || null,
+    academic_year_label: yearLabel,
+    total,
+    by_status: byStatus,
+  })
+})
+
 // ─── GET /api/students/:id — Full profile ───────────────────
 router.get('/:id', requirePermission('students.view'), (req, res) => {
   const db = getDb()
