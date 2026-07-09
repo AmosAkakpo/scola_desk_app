@@ -1,23 +1,43 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import Pagination from '../../components/Pagination'
+
+const PAGE_SIZE = 50
 
 export default function TeachersPage() {
   const [teachers, setTeachers] = useState([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const navigate = useNavigate()
+  const searchDebounceRef = useRef(null)
+
+  function handleSearchChange(value) {
+    setSearch(value)
+    clearTimeout(searchDebounceRef.current)
+    searchDebounceRef.current = setTimeout(() => setDebouncedSearch(value), 300)
+  }
+
+  useEffect(() => { setPage(1) }, [debouncedSearch, statusFilter])
 
   const fetchTeachers = useCallback(async () => {
     const params = new URLSearchParams()
-    if (search) params.set('search', search)
+    if (debouncedSearch) params.set('search', debouncedSearch)
     if (statusFilter) params.set('status', statusFilter)
+    params.set('page', page)
+    params.set('limit', PAGE_SIZE)
     const res = await api.get(`/api/teachers?${params}`)
     setTeachers(res.data.teachers || [])
+    setTotal(res.data.total || 0)
+    setTotalPages(res.data.total_pages || 1)
     setLoading(false)
-  }, [search, statusFilter])
+  }, [debouncedSearch, statusFilter, page])
 
   useEffect(() => { fetchTeachers() }, [fetchTeachers])
 
@@ -26,7 +46,7 @@ export default function TeachersPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-medium text-steel-900">Enseignants</h1>
-          <p className="text-sm text-steel-500 mt-0.5">{teachers.length} enseignant(s)</p>
+          <p className="text-sm text-steel-500 mt-0.5">{total} enseignant(s)</p>
         </div>
         <button onClick={() => setShowAdd(true)}
           className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
@@ -38,7 +58,7 @@ export default function TeachersPage() {
       </div>
 
       <div className="flex gap-3 mb-4">
-        <input type="text" placeholder="Rechercher par nom..." value={search} onChange={e => setSearch(e.target.value)}
+        <input type="text" placeholder="Rechercher par nom..." value={search} onChange={e => handleSearchChange(e.target.value)}
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand w-72" />
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
@@ -81,6 +101,8 @@ export default function TeachersPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
 
       {showAdd && <AddTeacherModal onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); fetchTeachers() }} />}
     </div>

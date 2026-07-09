@@ -10,37 +10,58 @@ router.use(requireAuth)
 // ─── GET /api/teachers — List with search + filters ─────────
 router.get('/', requirePermission('students.view'), (req, res) => {
   const db = getDb()
-  const { search, status } = req.query
+  const { search, status, page, limit } = req.query
   const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
 
-  let query = `
+  const pageNum = Math.max(1, parseInt(page) || 1)
+  const pageSize = Math.min(200, Math.max(1, parseInt(limit) || 50))
+
+  let whereClause = ` WHERE t.is_deleted = 0`
+  const params = []
+  if (search) { whereClause += ` AND (t.full_name LIKE ? OR t.matricule LIKE ?)`; params.push(`%${search}%`, `%${search}%`) }
+  if (status === 'active') { whereClause += ` AND t.is_active = 1` }
+  else if (status === 'inactive') { whereClause += ` AND t.is_active = 0` }
+
+  const total = db.prepare(`SELECT COUNT(*) as cnt FROM teachers t${whereClause}`).get(...params)?.cnt || 0
+
+  const teachers = db.prepare(`
     SELECT t.id, t.teacher_uid, t.matricule, t.full_name, t.phone, t.email, t.is_active
     FROM teachers t
-    WHERE t.is_deleted = 0
-  `
-  const params = []
+    ${whereClause}
+    ORDER BY t.full_name
+    LIMIT ? OFFSET ?
+  `).all(...params, pageSize, (pageNum - 1) * pageSize)
 
-  if (search) { query += ` AND (t.full_name LIKE ? OR t.matricule LIKE ?)`; params.push(`%${search}%`, `%${search}%`) }
-  if (status === 'active') { query += ` AND t.is_active = 1` }
-  else if (status === 'inactive') { query += ` AND t.is_active = 0` }
+  // Assignment counts + classroom labels, batched for this page only
+  // (was 2 queries PER teacher — fine at 50/page, was unbounded before).
+  if (teachers.length > 0) {
+    const ids = teachers.map(t => t.id)
+    const placeholders = ids.map(() => '?').join(',')
 
-  query += ` ORDER BY t.full_name`
-  const teachers = db.prepare(query).all(...params)
+    const countMap = {}
+    db.prepare(`
+      SELECT teacher_id, COUNT(*) as cnt FROM teacher_schedule
+      WHERE teacher_id IN (${placeholders}) AND academic_year_id = ?
+      GROUP BY teacher_id
+    `).all(...ids, yearId || 0).forEach(r => { countMap[r.teacher_id] = r.cnt })
 
-  // Attach assignments count per teacher
-  const assignStmt = db.prepare('SELECT COUNT(*) as cnt FROM teacher_schedule WHERE teacher_id = ? AND academic_year_id = ?')
-  const classStmt = db.prepare(`
-    SELECT DISTINCT c.label FROM teacher_schedule ts
-    JOIN classrooms c ON c.id = ts.classroom_id
-    WHERE ts.teacher_id = ? AND ts.academic_year_id = ?
-  `)
+    const classMap = {}
+    db.prepare(`
+      SELECT DISTINCT ts.teacher_id, c.label FROM teacher_schedule ts
+      JOIN classrooms c ON c.id = ts.classroom_id
+      WHERE ts.teacher_id IN (${placeholders}) AND ts.academic_year_id = ?
+    `).all(...ids, yearId || 0).forEach(r => { (classMap[r.teacher_id] ||= []).push(r.label) })
 
-  for (const t of teachers) {
-    t.assignment_count = assignStmt.get(t.id, yearId || 0)?.cnt || 0
-    t.classrooms = classStmt.all(t.id, yearId || 0).map(r => r.label)
+    for (const t of teachers) {
+      t.assignment_count = countMap[t.id] || 0
+      t.classrooms = classMap[t.id] || []
+    }
   }
 
-  return res.json({ teachers })
+  return res.json({
+    teachers, total, page: pageNum, page_size: pageSize,
+    total_pages: Math.max(1, Math.ceil(total / pageSize)),
+  })
 })
 
 // ─── GET /api/teachers/:id — Full profile ───────────────────
