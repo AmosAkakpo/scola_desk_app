@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import ConfirmModal from '../../components/ConfirmModal'
 
 export default function ClassroomsPage() {
   const [classrooms, setClassrooms] = useState([])
   const [totalRooms, setTotalRooms] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [classroomToDelete, setClassroomToDelete] = useState(null)
+  const [deletingClassroom, setDeletingClassroom] = useState(false)
+  const [deleteError, setDeleteError] = useState(null)
   const navigate = useNavigate()
 
   async function fetchClassrooms() {
@@ -18,13 +22,22 @@ export default function ClassroomsPage() {
 
   useEffect(() => { fetchClassrooms() }, [])
 
-  async function handleDelete(id, label) {
-    if (!confirm(`Supprimer la classe "${label}" ?`)) return
+  function requestDelete(id, label) {
+    setDeleteError(null)
+    setClassroomToDelete({ id, label })
+  }
+
+  async function confirmDelete() {
+    setDeletingClassroom(true)
+    setDeleteError(null)
     try {
-      await api.delete(`/api/classrooms/${id}`)
+      await api.delete(`/api/classrooms/${classroomToDelete.id}`)
+      setClassroomToDelete(null)
       fetchClassrooms()
     } catch (err) {
-      alert(err.response?.data?.message || 'Erreur')
+      setDeleteError(err.response?.data?.message || 'Erreur lors de la suppression')
+    } finally {
+      setDeletingClassroom(false)
     }
   }
 
@@ -71,7 +84,7 @@ export default function ClassroomsPage() {
                   <h3 className="text-sm font-medium text-steel-900">{c.label}</h3>
                   <p className="text-xs text-steel-500">{c.level_name}</p>
                 </div>
-                <button onClick={e => { e.stopPropagation(); handleDelete(c.id, c.label) }}
+                <button onClick={e => { e.stopPropagation(); requestDelete(c.id, c.label) }}
                   className="text-xs text-steel-300 hover:text-red-500 transition-colors p-1" title="Supprimer">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -96,6 +109,36 @@ export default function ClassroomsPage() {
       )}
 
       {showAdd && <AddClassroomModal onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); fetchClassrooms() }} />}
+
+      {/* Delete Confirmation Modal */}
+      {classroomToDelete && (
+        <ConfirmModal
+          title="Supprimer la classe"
+          message="Cette action est irréversible. Pour confirmer, tapez le nom de la classe."
+          requireMatch={classroomToDelete.label}
+          matchLabel="nom de la classe"
+          danger
+          confirmLabel="Supprimer"
+          savingLabel="Suppression..."
+          saving={deletingClassroom}
+          onCancel={() => { setClassroomToDelete(null); setDeleteError(null) }}
+          onConfirm={confirmDelete}
+        >
+          <>
+            <div className="bg-steel-50 rounded-lg px-4 py-3">
+              <p className="font-medium text-steel-800">{classroomToDelete.label}</p>
+            </div>
+            {deleteError && (
+              <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                <svg className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <p className="text-xs text-amber-700">{deleteError}</p>
+              </div>
+            )}
+          </>
+        </ConfirmModal>
+      )}
     </div>
   )
 }
