@@ -77,4 +77,78 @@ function getStudentFeeSummary(db, studentId, yearId, levelId) {
   return { fees: feeList, totalDue, totalPaid, remaining, status }
 }
 
-module.exports = { autoAssignMandatoryFees, getFeeAmountForStudent, getStudentFeeSummary }
+// Batch version of getStudentFeeSummary for a whole year at once. Runs a
+// constant number of queries (3) regardless of student count, instead of
+// ~5 per student — matters once a school has hundreds/thousands of
+// students (public schools especially). Still fully live-computed, just
+// batched: no caching, no stored values.
+// studentLevels: Map<studentId, levelId>
+// Returns: Map<studentId, { fees, totalDue, totalPaid, remaining, status }>
+function getFeeSummariesForYear(db, yearId, studentLevels) {
+  const selections = db.prepare(`
+    SELECT sfs.student_id, ft.id as fee_type_id, ft.name, ft.display_order, ft.is_mandatory, ft.is_system
+    FROM student_fee_selections sfs
+    JOIN fee_types ft ON ft.id = sfs.fee_type_id AND ft.academic_year_id = ? AND ft.is_active = 1
+    WHERE sfs.academic_year_id = ? AND sfs.opted_in = 1
+    ORDER BY ft.display_order ASC
+  `).all(yearId, yearId)
+
+  const paidRows = db.prepare(`
+    SELECT p.student_id, pa.fee_type_id, SUM(pa.amount) as paid
+    FROM payment_allocations pa
+    JOIN payments p ON p.id = pa.payment_id
+    WHERE p.academic_year_id = ? AND p.is_deleted = 0
+    GROUP BY p.student_id, pa.fee_type_id
+  `).all(yearId)
+
+  const amountRows = db.prepare(`
+    SELECT fta.fee_type_id, fta.level_id, fta.amount
+    FROM fee_type_amounts fta
+    JOIN fee_types ft ON ft.id = fta.fee_type_id
+    WHERE ft.academic_year_id = ?
+  `).all(yearId)
+
+  // Specific (fee_type_id, level_id) row wins over the NULL-level fallback.
+  const amountMap = {}
+  for (const r of amountRows) amountMap[`${r.fee_type_id}_${r.level_id ?? 'null'}`] = r.amount
+  const amountFor = (feeTypeId, levelId) =>
+    amountMap[`${feeTypeId}_${levelId}`] ?? amountMap[`${feeTypeId}_null`] ?? 0
+
+  const paidMap = {}
+  for (const r of paidRows) paidMap[`${r.student_id}_${r.fee_type_id}`] = r.paid
+
+  const selectionsByStudent = {}
+  for (const s of selections) {
+    (selectionsByStudent[s.student_id] ||= []).push(s)
+  }
+
+  const result = new Map()
+  for (const [studentId, levelId] of studentLevels) {
+    const fees = selectionsByStudent[studentId] || []
+    let totalDue = 0
+    let totalPaid = 0
+    const feeList = fees.map(f => {
+      const amount = amountFor(f.fee_type_id, levelId)
+      const paid = paidMap[`${studentId}_${f.fee_type_id}`] || 0
+      const effectivePaid = Math.min(paid, amount)
+      totalDue += amount
+      totalPaid += effectivePaid
+      return {
+        fee_type_id: f.fee_type_id,
+        name: f.name,
+        display_order: f.display_order,
+        is_mandatory: f.is_mandatory,
+        is_system: f.is_system,
+        amount_due: amount,
+        amount_paid: paid,
+        remaining: Math.max(0, amount - paid),
+      }
+    })
+    const remaining = Math.max(0, totalDue - totalPaid)
+    const status = totalPaid === 0 ? 'unpaid' : remaining <= 0 ? 'paid' : 'partial'
+    result.set(studentId, { fees: feeList, totalDue, totalPaid, remaining, status })
+  }
+  return result
+}
+
+module.exports = { autoAssignMandatoryFees, getFeeAmountForStudent, getStudentFeeSummary, getFeeSummariesForYear }

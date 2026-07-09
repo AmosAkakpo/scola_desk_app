@@ -5,7 +5,7 @@ const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
 const { requirePro } = require('../middleware/requirePro')
 const { generateUUID } = require('../utils/uid')
-const { autoAssignMandatoryFees, getFeeAmountForStudent, getStudentFeeSummary } = require('../utils/fees')
+const { autoAssignMandatoryFees, getFeeAmountForStudent, getStudentFeeSummary, getFeeSummariesForYear } = require('../utils/fees')
 
 function getYearId(db) {
   return db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
@@ -98,8 +98,9 @@ router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
   let totalPaid = 0
   let overdueCount = 0
   const classAgg = {} // classroom_id -> { due, paid, count } — real per-class figures
+  const summaries = getFeeSummariesForYear(db, yearId, new Map(students.map(s => [s.student_id, s.level_id])))
   for (const s of students) {
-    const summary = getStudentFeeSummary(db, s.student_id, yearId, s.level_id)
+    const summary = summaries.get(s.student_id)
     totalDue += summary.totalDue
     totalPaid += summary.totalPaid
     if (summary.totalPaid < summary.totalDue) overdueCount++
@@ -298,14 +299,14 @@ router.get('/tuition', requirePermission('finance.view'), (req, res) => {
 
   const students = db.prepare(studentsQuery).all(...params)
 
-  // Backfill: ensure every enrolled student has selections for all current mandatory fees
-  for (const s of students) autoAssignMandatoryFees(db, s.student_id, yearId)
-
+  // Mandatory-fee backfill happens where fees actually change (fee-type
+  // create/edit below, and on enrollment in students.js) -- not here.
+  // Doing it on every GET meant hundreds of redundant writes per request.
+  const summaries = getFeeSummariesForYear(db, yearId, new Map(students.map(s => [s.student_id, s.level_id])))
   const rows = students.map(s => {
-    const summary = getStudentFeeSummary(db, s.student_id, yearId, s.level_id)
+    const summary = summaries.get(s.student_id)
     return {
       ...s,
-      fees: summary.fees,
       total_due: summary.totalDue,
       total_paid: summary.totalPaid,
       remaining: summary.remaining,

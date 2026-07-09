@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
 
@@ -10,6 +10,7 @@ export default function StudentsPage() {
   const [classrooms, setClassrooms] = useState([])
   const [levels, setLevels] = useState([])
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [classFilter, setClassFilter] = useState('')
   const [levelFilter, setLevelFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -17,17 +18,24 @@ export default function StudentsPage() {
   const [showAdd, setShowAdd] = useState(false)
   const [generatingSummary, setGeneratingSummary] = useState(false)
   const navigate = useNavigate()
+  const searchDebounceRef = useRef(null)
+
+  function handleSearchChange(value) {
+    setSearch(value)
+    clearTimeout(searchDebounceRef.current)
+    searchDebounceRef.current = setTimeout(() => setDebouncedSearch(value), 300)
+  }
 
   const fetchStudents = useCallback(async () => {
     const params = new URLSearchParams()
-    if (search) params.set('search', search)
+    if (debouncedSearch) params.set('search', debouncedSearch)
     if (classFilter) params.set('classroom_id', classFilter)
     if (levelFilter) params.set('level_id', levelFilter)
     if (statusFilter) params.set('status', statusFilter)
     const res = await api.get(`/api/students?${params}`)
     setStudents(res.data.students || [])
     setLoading(false)
-  }, [search, classFilter, levelFilter, statusFilter])
+  }, [debouncedSearch, classFilter, levelFilter, statusFilter])
 
   useEffect(() => {
     fetchStudents()
@@ -172,7 +180,7 @@ export default function StudentsPage() {
       {/* Filters */}
       <div className="flex gap-3 mb-4 flex-wrap">
         <input type="text" placeholder="Rechercher par nom ou matricule..." value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={e => handleSearchChange(e.target.value)}
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand w-72" />
         <select value={classFilter} onChange={e => setClassFilter(e.target.value)}
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
 
@@ -16,15 +16,23 @@ export default function TuitionPage() {
   const [classroomId, setClassroomId] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [sort, setSort] = useState('')
   const navigate = useNavigate()
+  const searchDebounceRef = useRef(null)
+
+  function handleSearchChange(value) {
+    setSearch(value)
+    clearTimeout(searchDebounceRef.current)
+    searchDebounceRef.current = setTimeout(() => setDebouncedSearch(value), 300)
+  }
 
   function load() {
     setLoading(true)
     const params = new URLSearchParams()
     if (classroomId) params.set('classroom_id', classroomId)
     if (statusFilter) params.set('status', statusFilter)
-    if (search) params.set('search', search)
+    if (debouncedSearch) params.set('search', debouncedSearch)
     if (sort) params.set('sort', sort)
     api.get(`/api/finance/tuition?${params.toString()}`).then(res => {
       setData(res.data)
@@ -32,7 +40,7 @@ export default function TuitionPage() {
     }).catch(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [classroomId, statusFilter, search, sort])
+  useEffect(() => { load() }, [classroomId, statusFilter, debouncedSearch, sort])
 
   if (loading && !data) return <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" /></div>
 
@@ -69,7 +77,7 @@ export default function TuitionPage() {
           <option value="owed_desc">Reste à payer (plus élevé)</option>
           <option value="owed_asc">Reste à payer (moins élevé)</option>
         </select>
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..."
+        <input type="text" value={search} onChange={e => handleSearchChange(e.target.value)} placeholder="Rechercher..."
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand w-48" />
       </div>
 
