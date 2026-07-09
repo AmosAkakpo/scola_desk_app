@@ -61,25 +61,58 @@ export default function StudentsPage() {
       })
       const qrDataUrl = await QRCode.toDataURL(qrPayload, { margin: 1, width: 300 })
 
+      // Logo, same slot as the report card header (fallback to a plain "S" box if none uploaded)
+      let logoDataUrl = null
+      try {
+        const logoRes = await api.get('/api/settings/school-logo', { responseType: 'blob' })
+        logoDataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result)
+          reader.onerror = reject
+          reader.readAsDataURL(logoRes.data)
+        })
+      } catch { /* no logo configured */ }
+
       const doc = new jsPDF({ unit: 'mm', format: 'a4' })
       const W = 210
-      let y = 22
+      const boxSize = 24
+      const headerTop = 15
 
-      doc.setFontSize(16)
+      // Left: school logo
+      if (logoDataUrl) {
+        doc.addImage(logoDataUrl, 'PNG', 20, headerTop, boxSize, boxSize)
+      } else {
+        doc.setDrawColor(180)
+        doc.roundedRect(20, headerTop, boxSize, boxSize, 2, 2)
+        doc.setFontSize(16)
+        doc.setFont(undefined, 'bold')
+        doc.setTextColor(180)
+        doc.text('S', 20 + boxSize / 2, headerTop + boxSize / 2 + 3, { align: 'center' })
+        doc.setTextColor(0)
+      }
+
+      // Right: QR code, same slot the report card uses for the flag
+      doc.addImage(qrDataUrl, 'PNG', W - 20 - boxSize, headerTop, boxSize, boxSize)
+
+      // Center: title block
+      let y = headerTop + 6
+      doc.setFontSize(14)
       doc.setFont(undefined, 'bold')
       doc.text(data.school_name || 'Établissement scolaire', W / 2, y, { align: 'center' })
-      y += 9
-
-      doc.setFontSize(13)
+      y += 8
+      doc.setFontSize(12)
       doc.text('Résumé des effectifs', W / 2, y, { align: 'center' })
-      y += 12
-
-      doc.setFontSize(10)
+      y += 7
+      doc.setFontSize(9)
       doc.setFont(undefined, 'normal')
-      doc.text(`Année scolaire : ${data.academic_year_label || '—'}`, 20, y)
-      y += 6
-      doc.text(`Date d'impression : ${printedAt.toLocaleString('fr-FR')}`, 20, y)
-      y += 14
+      doc.text(`Année scolaire ${data.academic_year_label || '—'}`, W / 2, y, { align: 'center' })
+      y += 5
+      doc.text(`Imprimé le ${printedAt.toLocaleString('fr-FR')}`, W / 2, y, { align: 'center' })
+
+      y = headerTop + boxSize + 12
+      doc.setDrawColor(0)
+      doc.line(20, y, W - 20, y)
+      y += 10
 
       doc.setFont(undefined, 'bold')
       doc.setFontSize(11)
@@ -102,16 +135,6 @@ export default function StudentsPage() {
       doc.setFont(undefined, 'bold')
       doc.text('Total', 20, y)
       doc.text(String(data.total), 150, y, { align: 'right' })
-      y += 18
-
-      const qrSize = 35
-      doc.addImage(qrDataUrl, 'PNG', 20, y, qrSize, qrSize)
-      doc.setFont(undefined, 'normal')
-      doc.setFontSize(8)
-      doc.text(
-        "Scannez pour vérifier les chiffres et la date d'impression de ce document.",
-        20 + qrSize + 6, y + qrSize / 2, { maxWidth: W - 20 - qrSize - 26 }
-      )
 
       const yearSlug = (data.academic_year_label || 'annee').replace(/[^a-z0-9]/gi, '_')
       doc.save(`Resume_effectifs_${yearSlug}.pdf`)
