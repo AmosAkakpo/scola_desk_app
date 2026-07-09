@@ -3,7 +3,7 @@ const router = express.Router()
 const XLSX = require('xlsx')
 const { getDb } = require('../db/init')
 const { hashPassword } = require('../utils/password')
-const { generateUUID, generateShortUID, generateStudentUID, generateTeacherUID, generateUserUID, getSchoolPrefix } = require('../utils/uid')
+const { generateUUID, generateShortUID, generateStudentUID, generateStudentMatricule, generateTeacherUID, generateUserUID, getSchoolPrefix } = require('../utils/uid')
 const { autoAssignMandatoryFees } = require('../utils/fees')
 
 const TOTAL_STEPS = 13
@@ -1003,7 +1003,7 @@ router.post('/upload-students/:classroomId', express.raw({ type: '*/*', limit: '
       } else {
         seqNum++
         const year = new Date().getFullYear()
-        matricule = `${schoolCode}/${year}/${String(seqNum).padStart(4, '0')}`
+        matricule = generateStudentMatricule(schoolCode, year, seqNum)
       }
 
       // Educmaster national number is always optional, independent of matricule mode

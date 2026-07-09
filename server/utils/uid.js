@@ -38,9 +38,11 @@ function generateUserUID(schoolPrefix) {
     return `USR-${schoolPrefix}-${randomChars(4)}`
 }
 
-// Student matricule: SCHOOLCODE/YEAR/SEQ (e.g. BJ-2026-A4P3/2026/0001)
+// Student matricule: SCHOOLCODE-YEARSEQ (e.g. BJ-2026-A4P3-20260001)
+// year+seq are concatenated (not multiplied) so the format stays a simple,
+// collision-free 8-digit readable tail: 4-digit year + 4-digit zero-padded seq.
 function generateStudentMatricule(schoolCode, year, seq) {
-    return `${schoolCode}/${year}/${String(seq).padStart(4, '0')}`
+    return `${schoolCode}-${year}${String(seq).padStart(4, '0')}`
 }
 
 // Generates matricule from mask pattern (legacy)

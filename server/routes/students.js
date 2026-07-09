@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { getDb } = require('../db/init')
-const { generateUUID, generateStudentUID, getSchoolPrefix } = require('../utils/uid')
+const { generateUUID, generateStudentUID, generateStudentMatricule, getSchoolPrefix } = require('../utils/uid')
 const { autoAssignMandatoryFees } = require('../utils/fees')
 const { migrateStudentGrades } = require('../utils/transfer')
 const { requireAuth } = require('../middleware/requireAuth')
@@ -123,7 +123,7 @@ router.post('/', requirePermission('students.edit'), (req, res) => {
     // MAX(id)+1, not COUNT(*)+1 — COUNT collides with the UNIQUE matricule after deletions
     const seq = (db.prepare('SELECT MAX(id) as m FROM students').get()?.m || 0) + 1
     const year = new Date().getFullYear()
-    finalMatricule = `${schoolCode}/${year}/${String(seq).padStart(4, '0')}`
+    finalMatricule = generateStudentMatricule(schoolCode, year, seq)
   }
 
   const uid = generateStudentUID(getSchoolPrefix(db))

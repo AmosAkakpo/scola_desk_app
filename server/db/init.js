@@ -110,6 +110,10 @@ function runMigrations() {
         {
             version: '015_sync_checkpoint',
             run: require('./migration/015_sync_checkpoint').migration015
+        },
+        {
+            version: '016_matricule_format',
+            run: require('./migration/016_matricule_format').migration016
         }
     ]
 

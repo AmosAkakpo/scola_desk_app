@@ -1042,7 +1042,7 @@ function Step9Teachers({ onNext }) {
           <p className="text-sm font-medium text-steel-700 mb-3">Système de matricule élèves</p>
           <div className="space-y-2">
             {[
-              { value: 'custom', label: 'Auto-généré', desc: 'SCH/2026/0001, SCH/2026/0002...' },
+              { value: 'custom', label: 'Auto-généré', desc: 'SCH-20260001, SCH-20260002...' },
               { value: 'manual', label: 'Manuel (optionnel)', desc: 'L\'école fournit ses propres numéros' },
             ].map(opt => (
               <label key={opt.value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${mode === opt.value ? 'border-brand bg-brand-50' : 'border-steel-200 hover:border-steel-300'}`}>
