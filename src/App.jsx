@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 import ActivationPage from './pages/general/ActivationPage'
 import OnboardingWizard from './pages/general/OnboardingWizard'
+import RestorePage from './pages/general/RestorePage'
+import CreateAdminPage from './pages/general/CreateAdminPage'
 import LoginPage from './pages/general/LoginPage'
 import Layout from './components/Layout'
 import DashboardPage from './pages/dashboard/DashboardPage'
@@ -140,29 +142,54 @@ function ProtectedApp({ schoolInfo }) {
 function AppContent() {
   const [appState, setAppState] = useState('loading')
   const [schoolInfo, setSchoolInfo] = useState(null)
+  const [restoreInfo, setRestoreInfo] = useState(null)
 
-  useEffect(() => {
-    async function checkStatus() {
-      try {
-        const res = await api.get('/api/activation/status')
-        const { activated, configured, license_status } = res.data
-        setSchoolInfo(res.data)
+  async function checkStatus() {
+    try {
+      const res = await api.get('/api/activation/status')
+      const { activated, configured, license_status, has_users } = res.data
+      setSchoolInfo(res.data)
 
-        if (!activated) { setAppState('activation'); return }
-        if (license_status === 'tampered') { setAppState('tampered'); return }
-        if (license_status === 'expired') { setAppState('expired'); return }
-        if (license_status === 'suspended') { setAppState('suspended'); return }
-        setAppState(configured ? 'app' : 'onboarding')
-      } catch { setTimeout(checkStatus, 1000) }
-    }
-    checkStatus()
-  }, [])
+      if (!activated) { setAppState('activation'); return }
+      if (license_status === 'tampered') { setAppState('tampered'); return }
+      if (license_status === 'expired') { setAppState('expired'); return }
+      if (license_status === 'suspended') { setAppState('suspended'); return }
+
+      // Post-restore state: data is back but users are never synced
+      if (configured && !has_users) { setAppState('create-admin'); return }
+
+      if (!configured) {
+        // New/wiped PC — offer the cloud backup if CAP has one.
+        // Offline or no backup → normal onboarding.
+        try {
+          const rc = await api.get('/api/restore/check')
+          if (rc.data.available) {
+            setRestoreInfo(rc.data)
+            setAppState('restore')
+            return
+          }
+        } catch { /* offline — restore impossible anyway */ }
+        setAppState('onboarding')
+        return
+      }
+
+      setAppState('app')
+    } catch { setTimeout(checkStatus, 1000) }
+  }
+
+  useEffect(() => { checkStatus() }, [])
 
   if (appState === 'loading') return <LoadingScreen />
-  if (appState === 'activation') return <ActivationPage onActivated={(data) => { setSchoolInfo(data); setAppState('onboarding') }} />
+  if (appState === 'activation') return <ActivationPage onActivated={() => { setAppState('loading'); checkStatus() }} />
   if (appState === 'tampered') return <TamperedScreen />
   if (appState === 'expired') return <ExpiredScreen schoolName={schoolInfo?.school_name} expiry={schoolInfo?.expiry} />
   if (appState === 'suspended') return <SuspendedScreen schoolName={schoolInfo?.school_name} />
+  if (appState === 'restore') return (
+    <RestorePage info={restoreInfo}
+      onDone={() => { setAppState('loading'); checkStatus() }}
+      onSkip={() => setAppState('onboarding')} />
+  )
+  if (appState === 'create-admin') return <CreateAdminPage onDone={() => { setAppState('loading'); checkStatus() }} />
   if (appState === 'onboarding') return <OnboardingWizard onComplete={() => setAppState('app')} />
 
   return <ProtectedApp schoolInfo={schoolInfo} />

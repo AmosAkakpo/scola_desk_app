@@ -131,9 +131,14 @@ router.get('/status', (req, res) => {
   // Live student count
   const actualStudents = db.prepare("SELECT COUNT(*) as cnt FROM students WHERE is_deleted = 0").get()?.cnt || 0
 
+  // After a cloud restore the school is configured but has zero users
+  // (users are never synced) — the boot flow needs to detect that state.
+  const userCount = db.prepare('SELECT COUNT(*) as cnt FROM users WHERE is_deleted = 0 AND is_active = 1').get()?.cnt || 0
+
   return res.json({
     activated: true,
     configured: config?.is_configured === 1,
+    has_users: userCount > 0,
     license_status: licenseStatus,
     school_name: config?.school_name || null,
     school_code: license?.school_id || null,
