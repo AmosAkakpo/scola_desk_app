@@ -109,9 +109,10 @@ function ResetAdminModal({ onClose }) {
           </>
         ) : (
           <>
-            <h2 className="text-base font-medium text-steel-900 mb-1">Réinitialiser le mot de passe admin</h2>
+            <h2 className="text-base font-medium text-steel-900 mb-1">Réinitialiser le mot de passe administrateur</h2>
             <p className="text-sm text-steel-500 mb-4">
-              Contactez ScolaDesk pour obtenir un code de réinitialisation, valable uniquement le jour de son émission.
+              Réinitialise uniquement le compte <strong>administrateur</strong> — pas secrétaire ni comptable.
+              Contactez ScolaDesk pour obtenir un code, valable uniquement le jour de son émission et à usage unique.
             </p>
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>

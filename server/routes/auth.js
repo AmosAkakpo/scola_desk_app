@@ -280,6 +280,20 @@ router.post('/reset-admin', async (req, res) => {
             return res.status(403).json({ error: 'INVALID_CODE', message: 'Code de réinitialisation invalide ou expiré' })
         }
 
+        // Single-use: the code itself carries no state (verified purely by
+        // HMAC recomputation, on purpose, for fully offline verification),
+        // so replay protection has to live here -- otherwise anyone who
+        // overheard/saw the code could keep resetting the admin password
+        // for its whole ~48h validity window.
+        const alreadyUsed = db.prepare("SELECT value FROM app_settings WHERE key = 'admin_reset_code_used'").get()?.value
+        if (alreadyUsed === normalized) {
+            db.prepare(`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, ip_address)
+        VALUES (NULL, 'ADMIN_RESET_CODE_REPLAY_BLOCKED', 'user', NULL, ?)
+      `).run(req.ip)
+            return res.status(403).json({ error: 'CODE_ALREADY_USED', message: 'Ce code a déjà été utilisé. Contactez ScolaDesk pour un nouveau code.' })
+        }
+
         const admin = db.prepare(`
       SELECT u.id FROM users u
       JOIN roles r ON r.id = u.role_id
@@ -294,6 +308,9 @@ router.post('/reset-admin', async (req, res) => {
         const passwordHash = await hashPassword(new_password)
         db.prepare("UPDATE users SET password_hash = ?, is_active = 1, updated_at = datetime('now') WHERE id = ?")
             .run(passwordHash, admin.id)
+
+        db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('admin_reset_code_used', ?, datetime('now'))")
+            .run(normalized)
 
         db.prepare(`
       INSERT INTO audit_logs (user_id, action, entity_type, entity_id, ip_address)
