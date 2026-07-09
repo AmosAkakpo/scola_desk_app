@@ -1,10 +1,33 @@
 const express = require('express')
 const router = express.Router()
+const { createHmac } = require('crypto')
 const { getDb } = require('../db/init')
 const { hashPassword, verifyPassword } = require('../utils/password')
 const { signToken } = require('../utils/jwt')
 const { generateUUID, generateShortUID, generateUserUID, getSchoolPrefix } = require('../utils/uid')
 const { requireAuth } = require('../middleware/requireAuth')
+
+const PAYLOAD_SECRET = (process.env.LICENSE_PAYLOAD_SECRET || 'scoladesk-v1-secret-change-in-production').trim()
+const RESET_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+// Day-code for admin password reset: HMAC over school_code + date, mapped to
+// 8 safe-charset chars. CAP computes the identical code server-side (same
+// secret) and staff read it over the phone — the app verifies it fully
+// offline, nothing is stored on either side.
+function resetCodeFor(schoolCode, dateStr) {
+    const digest = createHmac('sha256', PAYLOAD_SECRET)
+        .update(`RESET|${schoolCode.toUpperCase()}|${dateStr}`)
+        .digest()
+    let code = ''
+    for (let i = 0; i < 8; i++) code += RESET_CHARSET[digest[i] % RESET_CHARSET.length]
+    return code
+}
+
+function localDateStr(offsetDays = 0) {
+    const d = new Date()
+    d.setDate(d.getDate() + offsetDays)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 // ─── POST /api/auth/login ─────────────────────────────────────────
 router.post('/login', async (req, res) => {
@@ -221,6 +244,66 @@ router.post('/setup', async (req, res) => {
             error: 'SERVER_ERROR',
             message: 'Erreur serveur'
         })
+    }
+})
+
+// ─── POST /api/auth/reset-admin ──────────────────────────────────
+// Pre-login. Resets the admin account's password against a day-code
+// obtained from ScolaDesk over the phone (verified offline via HMAC).
+// Accepts today's and yesterday's code (midnight edge on a long call).
+router.post('/reset-admin', async (req, res) => {
+    try {
+        const { code, new_password } = req.body
+
+        if (!code || !new_password) {
+            return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Code et nouveau mot de passe requis' })
+        }
+        if (new_password.length < 6) {
+            return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Mot de passe minimum 6 caractères' })
+        }
+
+        const db = getDb()
+        const schoolCode = db.prepare('SELECT school_code FROM school_config LIMIT 1').get()?.school_code
+        if (!schoolCode) {
+            return res.status(400).json({ error: 'NOT_ACTIVATED', message: 'Application non activée' })
+        }
+
+        const normalized = code.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
+        const valid = [localDateStr(0), localDateStr(-1)]
+            .some(d => resetCodeFor(schoolCode, d) === normalized)
+
+        if (!valid) {
+            db.prepare(`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, ip_address)
+        VALUES (NULL, 'ADMIN_RESET_CODE_REJECTED', 'user', NULL, ?)
+      `).run(req.ip)
+            return res.status(403).json({ error: 'INVALID_CODE', message: 'Code de réinitialisation invalide ou expiré' })
+        }
+
+        const admin = db.prepare(`
+      SELECT u.id FROM users u
+      JOIN roles r ON r.id = u.role_id
+      WHERE r.name = 'admin' AND u.is_deleted = 0
+      ORDER BY u.id LIMIT 1
+    `).get()
+
+        if (!admin) {
+            return res.status(404).json({ error: 'NO_ADMIN', message: 'Aucun compte administrateur trouvé' })
+        }
+
+        const passwordHash = await hashPassword(new_password)
+        db.prepare("UPDATE users SET password_hash = ?, is_active = 1, updated_at = datetime('now') WHERE id = ?")
+            .run(passwordHash, admin.id)
+
+        db.prepare(`
+      INSERT INTO audit_logs (user_id, action, entity_type, entity_id, ip_address)
+      VALUES (?, 'ADMIN_PASSWORD_RESET', 'user', ?, ?)
+    `).run(admin.id, String(admin.id), req.ip)
+
+        return res.json({ message: 'Mot de passe administrateur réinitialisé' })
+    } catch (err) {
+        console.error('[RESET-ADMIN]', err)
+        return res.status(500).json({ error: 'SERVER_ERROR', message: 'Erreur serveur' })
     }
 })
 
