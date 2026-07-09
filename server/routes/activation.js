@@ -172,6 +172,18 @@ router.post('/activate', async (req, res) => {
       })
     }
 
+    // 1 PC = 1 school: never overwrite one school's identity onto another
+    // school's data. Re-activating the SAME school (renewal, reissued key)
+    // stays allowed — this only fires on a school-code mismatch.
+    const existingConfig = getDb().prepare('SELECT school_code, is_configured FROM school_config LIMIT 1').get()
+    if (existingConfig?.school_code && existingConfig.is_configured === 1
+        && existingConfig.school_code !== school_code.trim().toUpperCase()) {
+      return res.status(403).json({
+        error: 'SCHOOL_MISMATCH',
+        message: `Ce PC contient déjà les données d'un autre établissement (${existingConfig.school_code}). Contactez ScolaDesk.`,
+      })
+    }
+
     const response = await axios.post(`${CAP_URL}/api/activate`, {
       school_id: school_code.trim().toUpperCase(),
       license_key: license_key.trim().toUpperCase(),
