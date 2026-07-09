@@ -2,7 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { getDb } = require('../db/init')
 const { generateUUID } = require('../utils/uid')
-const { getStudentFeeSummary } = require('../utils/fees')
+const { getStudentFeeSummary, getFeeSummariesForYear } = require('../utils/fees')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
 
@@ -38,12 +38,45 @@ router.get('/list/:classroomId/:semester', requirePermission('reports.view'), (r
   // Live payment status per student — informational only, never blocks printing.
   // For STANDARD schools fee_types is empty → remaining 0 → no banner.
   const levelId = db.prepare('SELECT level_id FROM classrooms WHERE id = ?').get(req.params.classroomId)?.level_id
+  const summaries = getFeeSummariesForYear(db, yearId, new Map(snapshots.map(s => [s.student_id, levelId])))
   for (const snap of snapshots) {
-    const summary = getStudentFeeSummary(db, snap.student_id, yearId, levelId)
-    snap.payment_remaining = summary.remaining
+    snap.payment_remaining = summaries.get(snap.student_id)?.remaining || 0
   }
 
   return res.json({ snapshots })
+})
+
+// ─── GET /api/report-cards/batch-view/:classroomId/:semester — All bulletins
+// for a classroom+semester in one call, for batch printing. Replaces N
+// individual GET /view/:id requests (one HTTP round-trip per student) with
+// one request + a constant number of queries.
+router.get('/batch-view/:classroomId/:semester', requirePermission('reports.view'), (req, res) => {
+  const db = getDb()
+  const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
+
+  const rows = db.prepare(`
+    SELECT rc.id, rc.student_id, rc.snapshot_data, rc.generated_at, s.full_name
+    FROM report_card_snapshots rc
+    JOIN students s ON s.id = rc.student_id
+    WHERE rc.classroom_id = ? AND rc.academic_year_id = ? AND rc.semester = ?
+    ORDER BY s.full_name
+  `).all(req.params.classroomId, yearId, req.params.semester)
+
+  const levelId = db.prepare('SELECT level_id FROM classrooms WHERE id = ?').get(req.params.classroomId)?.level_id
+  const summaries = getFeeSummariesForYear(db, yearId, new Map(rows.map(r => [r.student_id, levelId])))
+
+  const results = []
+  for (const row of rows) {
+    let snapshot
+    try { snapshot = JSON.parse(row.snapshot_data) } catch { continue }
+    results.push({
+      snapshot,
+      generated_at: row.generated_at,
+      payment_remaining: summaries.get(row.student_id)?.remaining || 0,
+    })
+  }
+
+  return res.json({ snapshots: results })
 })
 
 // ─── POST /api/report-cards/generate — Generate snapshots ───
@@ -143,6 +176,18 @@ router.post('/generate', requirePermission('reports.generate'), (req, res) => {
     }
   }
 
+  // Subject list is identical for every student in this classroom/level --
+  // was being re-fetched once per student inside the loop below.
+  const allSubjects = classroom.serie_id
+    ? db.prepare(`SELECT DISTINCT ls.subject_id, s.name AS subject_name, s.short_code, ls.coefficient
+         FROM level_subjects ls JOIN subjects s ON s.id = ls.subject_id
+         WHERE ls.level_id = ? AND ls.is_active = 1 AND (ls.serie_id = ? OR ls.serie_id IS NULL)
+         ORDER BY s.name`).all(classroom.level_id, classroom.serie_id)
+    : db.prepare(`SELECT ls.subject_id, s.name AS subject_name, s.short_code, ls.coefficient
+         FROM level_subjects ls JOIN subjects s ON s.id = ls.subject_id
+         WHERE ls.level_id = ? AND ls.is_active = 1 AND ls.serie_id IS NULL
+         ORDER BY s.name`).all(classroom.level_id)
+
   db.transaction(() => {
     // Delete existing snapshots for these students+semester (regenerate)
     for (const student of students) {
@@ -151,17 +196,6 @@ router.post('/generate', requirePermission('reports.generate'), (req, res) => {
     }
 
     for (const student of students) {
-      // All subjects for the classroom (always show even without grades)
-      const allSubjects = classroom.serie_id
-        ? db.prepare(`SELECT DISTINCT ls.subject_id, s.name AS subject_name, s.short_code, ls.coefficient
-             FROM level_subjects ls JOIN subjects s ON s.id = ls.subject_id
-             WHERE ls.level_id = ? AND ls.is_active = 1 AND (ls.serie_id = ? OR ls.serie_id IS NULL)
-             ORDER BY s.name`).all(classroom.level_id, classroom.serie_id)
-        : db.prepare(`SELECT ls.subject_id, s.name AS subject_name, s.short_code, ls.coefficient
-             FROM level_subjects ls JOIN subjects s ON s.id = ls.subject_id
-             WHERE ls.level_id = ? AND ls.is_active = 1 AND ls.serie_id IS NULL
-             ORDER BY s.name`).all(classroom.level_id)
-
       // Subject averages (only exist if computed)
       const computedAvgs = db.prepare(`
         SELECT sa.*, sub.name AS subject_name, sub.short_code

@@ -16,14 +16,10 @@ export default function ReportCardBatchPage() {
   useEffect(() => {
     if (!classroomId) { setError('Paramètres manquants'); setLoading(false); return }
 
-    api.get(`/api/report-cards/list/${classroomId}/${semester}`)
-      .then(async res => {
-        const list = res.data.snapshots || []
-        if (list.length === 0) { setSnapshots([]); setLoading(false); return }
-        const results = await Promise.all(
-          list.map(s => api.get(`/api/report-cards/view/${s.id}`).then(r => r.data.snapshot))
-        )
-        setSnapshots(results.filter(Boolean))
+    api.get(`/api/report-cards/batch-view/${classroomId}/${semester}`)
+      .then(res => {
+        const results = (res.data.snapshots || []).map(s => s.snapshot).filter(Boolean)
+        setSnapshots(results)
         setLoading(false)
       })
       .catch(() => { setError('Erreur de chargement'); setLoading(false) })
