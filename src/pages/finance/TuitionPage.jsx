@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import Pagination from '../../components/Pagination'
 
 function formatXOF(n) {
   if (n === null || n === undefined) return '—'
@@ -9,6 +10,7 @@ function formatXOF(n) {
 
 const STATUS_COLORS = { paid: 'bg-brand-50 text-brand-600', partial: 'bg-orange-50 text-orange-600', unpaid: 'bg-red-50 text-red-600' }
 const STATUS_LABELS = { paid: 'Soldé', partial: 'Partiel', unpaid: 'Impayé' }
+const PAGE_SIZE = 50
 
 export default function TuitionPage() {
   const [data, setData] = useState(null)
@@ -18,6 +20,7 @@ export default function TuitionPage() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [sort, setSort] = useState('')
+  const [page, setPage] = useState(1)
   const navigate = useNavigate()
   const searchDebounceRef = useRef(null)
 
@@ -27,6 +30,8 @@ export default function TuitionPage() {
     searchDebounceRef.current = setTimeout(() => setDebouncedSearch(value), 300)
   }
 
+  useEffect(() => { setPage(1) }, [classroomId, statusFilter, debouncedSearch, sort])
+
   function load() {
     setLoading(true)
     const params = new URLSearchParams()
@@ -34,26 +39,32 @@ export default function TuitionPage() {
     if (statusFilter) params.set('status', statusFilter)
     if (debouncedSearch) params.set('search', debouncedSearch)
     if (sort) params.set('sort', sort)
+    params.set('page', page)
+    params.set('limit', PAGE_SIZE)
     api.get(`/api/finance/tuition?${params.toString()}`).then(res => {
       setData(res.data)
       setLoading(false)
     }).catch(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [classroomId, statusFilter, debouncedSearch, sort])
+  useEffect(() => { load() }, [classroomId, statusFilter, debouncedSearch, sort, page])
 
   if (loading && !data) return <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" /></div>
 
   const students = data?.students || []
-  const totalDue = students.reduce((s, r) => s + r.total_due, 0)
-  const totalPaid = students.reduce((s, r) => s + r.total_paid, 0)
+  const totalCount = data?.total || 0
+  // Aggregates come from the server, computed over ALL matching students,
+  // not just this page -- summing the paged `students` array would silently
+  // undercount once there's more than one page.
+  const totalDue = data?.total_due || 0
+  const totalPaid = data?.total_paid || 0
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-medium text-steel-900">Paiements scolarité</h1>
-          <p className="text-sm text-steel-500 mt-0.5">{students.length} élève(s) — {formatXOF(totalPaid)} / {formatXOF(totalDue)}</p>
+          <p className="text-sm text-steel-500 mt-0.5">{totalCount} élève(s) — {formatXOF(totalPaid)} / {formatXOF(totalDue)}</p>
         </div>
       </div>
 
@@ -122,6 +133,8 @@ export default function TuitionPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} totalPages={data?.total_pages || 1} onPageChange={setPage} />
     </div>
   )
 }

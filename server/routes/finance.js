@@ -282,7 +282,9 @@ router.delete('/fee-types/:id', requirePermission('finance.edit'), (req, res) =>
 router.get('/tuition', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
-  const { classroom_id, status, search, sort } = req.query
+  const { classroom_id, status, search, sort, page, limit } = req.query
+  const pageNum = Math.max(1, parseInt(page) || 1)
+  const pageSize = Math.min(200, Math.max(1, parseInt(limit) || 50))
 
   let studentsQuery = `
     SELECT s.id as student_id, s.full_name, s.matricule, e.classroom_id, c.label as classroom_label,
@@ -320,9 +322,23 @@ router.get('/tuition', requirePermission('finance.view'), (req, res) => {
   if (sort === 'owed_desc') filtered.sort((a, b) => b.remaining - a.remaining)
   else if (sort === 'owed_asc') filtered.sort((a, b) => a.remaining - b.remaining)
 
+  // status/sort depend on the computed summary, not a DB column, so
+  // filtering/sorting happens in memory first (still O(1) queries thanks to
+  // the batched summary above) -- pagination is just a slice at the end.
+  // Aggregates are computed over the full filtered set BEFORE slicing, so
+  // the summary cards reflect all matching students, not just the page.
+  const total = filtered.length
+  const aggTotalDue = filtered.reduce((s, r) => s + r.total_due, 0)
+  const aggTotalPaid = filtered.reduce((s, r) => s + r.total_paid, 0)
+  const paged = filtered.slice((pageNum - 1) * pageSize, pageNum * pageSize)
+
   const classrooms = db.prepare('SELECT c.id, c.label FROM classrooms c WHERE c.academic_year_id = ? AND c.is_deleted = 0 ORDER BY c.label').all(yearId)
 
-  return res.json({ students: filtered, classrooms })
+  return res.json({
+    students: paged, classrooms, total, page: pageNum, page_size: pageSize,
+    total_pages: Math.max(1, Math.ceil(total / pageSize)),
+    total_due: aggTotalDue, total_paid: aggTotalPaid,
+  })
 })
 
 // ─── TUITION — student detail ───────────────────────────────
