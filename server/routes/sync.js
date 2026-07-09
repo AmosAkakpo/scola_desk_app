@@ -303,5 +303,7 @@ router.get('/progress', (req, res) => {
 })
 
 router.hasSuccessfulFullSync = hasSuccessfulFullSync
+router.SYNC_TABLES = SYNC_TABLES
+router.TABLE_LABELS = TABLE_LABELS
 
 module.exports = router
