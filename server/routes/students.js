@@ -12,30 +12,43 @@ router.use(requireAuth)
 // ─── GET /api/students — List with search + filters ─────────
 router.get('/', requirePermission('students.view'), (req, res) => {
   const db = getDb()
-  const { search, classroom_id, level_id, status } = req.query
+  const { search, classroom_id, level_id, status, page, limit } = req.query
   const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
 
-  let query = `
-    SELECT s.id, s.student_uid, s.matricule, s.full_name, s.gender, s.status, s.birth_date,
-           e.classroom_id, c.label AS classroom_label, l.name AS level_name
+  const pageNum = Math.max(1, parseInt(page) || 1)
+  const pageSize = Math.min(200, Math.max(1, parseInt(limit) || 50))
+
+  const fromClause = `
     FROM students s
     LEFT JOIN enrollments e ON e.student_id = s.id AND e.academic_year_id = ? AND e.is_deleted = 0
     LEFT JOIN classrooms c ON c.id = e.classroom_id
     LEFT JOIN levels l ON l.id = c.level_id
-    WHERE s.is_deleted = 0
   `
+  let whereClause = ` WHERE s.is_deleted = 0`
   const params = [yearId || 0]
 
   if (search) {
-    query += ` AND (s.full_name LIKE ? OR s.matricule LIKE ?)`
+    whereClause += ` AND (s.full_name LIKE ? OR s.matricule LIKE ?)`
     params.push(`%${search}%`, `%${search}%`)
   }
-  if (classroom_id) { query += ` AND e.classroom_id = ?`; params.push(classroom_id) }
-  if (level_id) { query += ` AND c.level_id = ?`; params.push(level_id) }
-  if (status) { query += ` AND s.status = ?`; params.push(status) }
+  if (classroom_id) { whereClause += ` AND e.classroom_id = ?`; params.push(classroom_id) }
+  if (level_id) { whereClause += ` AND c.level_id = ?`; params.push(level_id) }
+  if (status) { whereClause += ` AND s.status = ?`; params.push(status) }
 
-  query += ` ORDER BY s.full_name`
-  return res.json({ students: db.prepare(query).all(...params) })
+  const total = db.prepare(`SELECT COUNT(*) as cnt ${fromClause}${whereClause}`).get(...params)?.cnt || 0
+
+  const students = db.prepare(`
+    SELECT s.id, s.student_uid, s.matricule, s.full_name, s.gender, s.status, s.birth_date,
+           e.classroom_id, c.label AS classroom_label, l.name AS level_name
+    ${fromClause}${whereClause}
+    ORDER BY s.full_name
+    LIMIT ? OFFSET ?
+  `).all(...params, pageSize, (pageNum - 1) * pageSize)
+
+  return res.json({
+    students, total, page: pageNum, page_size: pageSize,
+    total_pages: Math.max(1, Math.ceil(total / pageSize)),
+  })
 })
 
 // ─── GET /api/students/summary — Effectifs by status (current year) ─

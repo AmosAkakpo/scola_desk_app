@@ -1,12 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import Pagination from '../../components/Pagination'
 
 const STATUS_LABELS = { active: 'Actif', graduated: 'Diplômé', transferred: 'Transféré', excluded: 'Exclu' }
 const STATUS_COLORS = { active: 'bg-brand-50 text-brand-600', graduated: 'bg-steel-100 text-steel-600', transferred: 'bg-yellow-100 text-yellow-700', excluded: 'bg-red-100 text-red-700' }
+const PAGE_SIZE = 50
 
 export default function StudentsPage() {
   const [students, setStudents] = useState([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [page, setPage] = useState(1)
   const [classrooms, setClassrooms] = useState([])
   const [levels, setLevels] = useState([])
   const [search, setSearch] = useState('')
@@ -26,16 +31,23 @@ export default function StudentsPage() {
     searchDebounceRef.current = setTimeout(() => setDebouncedSearch(value), 300)
   }
 
+  // Any filter/search change invalidates the current page — back to page 1.
+  useEffect(() => { setPage(1) }, [debouncedSearch, classFilter, levelFilter, statusFilter])
+
   const fetchStudents = useCallback(async () => {
     const params = new URLSearchParams()
     if (debouncedSearch) params.set('search', debouncedSearch)
     if (classFilter) params.set('classroom_id', classFilter)
     if (levelFilter) params.set('level_id', levelFilter)
     if (statusFilter) params.set('status', statusFilter)
+    params.set('page', page)
+    params.set('limit', PAGE_SIZE)
     const res = await api.get(`/api/students?${params}`)
     setStudents(res.data.students || [])
+    setTotal(res.data.total || 0)
+    setTotalPages(res.data.total_pages || 1)
     setLoading(false)
-  }, [debouncedSearch, classFilter, levelFilter, statusFilter])
+  }, [debouncedSearch, classFilter, levelFilter, statusFilter, page])
 
   useEffect(() => {
     fetchStudents()
@@ -157,7 +169,7 @@ export default function StudentsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-medium text-steel-900">Élèves</h1>
-          <p className="text-sm text-steel-500 mt-0.5">{students.length} élève(s) enregistré(s)</p>
+          <p className="text-sm text-steel-500 mt-0.5">{total} élève(s) enregistré(s)</p>
         </div>
         <div className="flex gap-2">
           <button onClick={downloadSummaryPdf} disabled={generatingSummary}
@@ -233,6 +245,8 @@ export default function StudentsPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
 
       {/* Add Student Modal */}
       {showAdd && <AddStudentModal classrooms={classrooms} onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); fetchStudents() }} />}
