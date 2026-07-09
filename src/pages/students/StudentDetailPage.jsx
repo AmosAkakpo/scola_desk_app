@@ -5,6 +5,11 @@ import ConfirmModal from '../../components/ConfirmModal'
 
 const STATUS_LABELS = { active: 'Actif', graduated: 'Diplômé', transferred: 'Transféré', excluded: 'Exclu' }
 
+// Maps student.status to a verdict badge for the current year row, used only
+// as a fallback until Phase 5 (Promotion Engine) starts populating real
+// promotion_details.verdict rows.
+const STATUS_TO_VERDICT = { excluded: 'exclu', transferred: 'transfere', graduated: 'admis' }
+
 const VERDICT_CONFIG = {
   admis: { label: 'Admis', bg: 'bg-brand-50 text-brand-600' },
   doublant: { label: 'Redoublant', bg: 'bg-yellow-100 text-yellow-700' },
@@ -241,7 +246,7 @@ export default function StudentDetailPage() {
                   const avg = h.final_average ?? lastSemester?.average ?? null
                   const rank = lastSemester?.rank ?? null
                   const classSize = lastSemester?.class_size ?? null
-                  const verdict = h.verdict || (i === 0 && !h.final_average ? 'en_cours' : null)
+                  const verdict = h.verdict || (i === 0 && !h.final_average ? (STATUS_TO_VERDICT[student.status] || 'en_cours') : null)
                   return (
                     <tr key={i} className="border-b border-steel-100 hover:bg-steel-50 transition-colors">
                       <td className="px-4 py-3 text-steel-800 font-medium">{h.year_label}</td>
