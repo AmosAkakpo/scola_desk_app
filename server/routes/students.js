@@ -253,7 +253,7 @@ router.post('/:id/expel', requirePermission('students.edit'), (req, res) => {
   if (!enrollment) return res.status(400).json({ error: 'NOT_ENROLLED' })
 
   db.transaction(() => {
-    db.prepare("UPDATE enrollments SET is_expelled = 1, updated_at = datetime('now') WHERE id = ?").run(enrollment.id)
+    db.prepare('UPDATE enrollments SET is_expelled = 1 WHERE id = ?').run(enrollment.id)
     db.prepare("UPDATE students SET status = 'excluded', updated_at = datetime('now') WHERE id = ?").run(req.params.id)
   })()
 
