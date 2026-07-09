@@ -260,4 +260,23 @@ router.post('/:id/expel', requirePermission('students.edit'), (req, res) => {
   return res.json({ success: true })
 })
 
+// ─── POST /api/students/:id/mark-transferred — Student left for another school ─
+// Same exclusion mechanism as expel (is_expelled=1 hides them from grade
+// computation and report-card class-size/ranking) but sets status to
+// 'transferred' instead of 'excluded' — different reason, same effect.
+router.post('/:id/mark-transferred', requirePermission('students.edit'), (req, res) => {
+  const db = getDb()
+  const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
+
+  const enrollment = db.prepare('SELECT id FROM enrollments WHERE student_id = ? AND academic_year_id = ? AND is_deleted = 0 LIMIT 1').get(req.params.id, yearId)
+  if (!enrollment) return res.status(400).json({ error: 'NOT_ENROLLED' })
+
+  db.transaction(() => {
+    db.prepare('UPDATE enrollments SET is_expelled = 1 WHERE id = ?').run(enrollment.id)
+    db.prepare("UPDATE students SET status = 'transferred', updated_at = datetime('now') WHERE id = ?").run(req.params.id)
+  })()
+
+  return res.json({ success: true })
+})
+
 module.exports = router

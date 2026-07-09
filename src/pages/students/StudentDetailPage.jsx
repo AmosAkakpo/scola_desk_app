@@ -42,6 +42,8 @@ export default function StudentDetailPage() {
   const [sanctionSaving, setSanctionSaving] = useState(false)
   const [showExpelConfirm, setShowExpelConfirm] = useState(false)
   const [expelMatriculeInput, setExpelMatriculeInput] = useState('')
+  const [showTransferOutConfirm, setShowTransferOutConfirm] = useState(false)
+  const [transferringOut, setTransferringOut] = useState(false)
   const [defaultConduite, setDefaultConduite] = useState(18)
   const [conduiteScore, setConduiteScore] = useState(18)
   const [conduiteNote, setConduiteNote] = useState('')
@@ -120,6 +122,14 @@ export default function StudentDetailPage() {
     await api.post(`/api/students/${id}/expel`)
     setShowExpelConfirm(false)
     setExpelMatriculeInput('')
+    fetchData()
+  }
+
+  async function confirmTransferOut() {
+    setTransferringOut(true)
+    await api.post(`/api/students/${id}/mark-transferred`)
+    setTransferringOut(false)
+    setShowTransferOutConfirm(false)
     fetchData()
   }
 
@@ -270,11 +280,17 @@ export default function StudentDetailPage() {
       <section className="bg-white rounded-xl border border-steel-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xs font-semibold text-steel-400 uppercase tracking-wide">Sanctions & Décisions</h2>
-          {enrollment && student.status !== 'excluded' && (
-            <button onClick={() => setShowExpelConfirm(true)}
-              className="px-3 py-1.5 border border-red-200 text-red-500 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors">
-              Expulser l'élève
-            </button>
+          {enrollment && student.status === 'active' && (
+            <div className="flex gap-2">
+              <button onClick={() => setShowTransferOutConfirm(true)}
+                className="px-3 py-1.5 border border-blue-200 text-blue-500 rounded-lg text-xs font-medium hover:bg-blue-50 transition-colors">
+                Marquer comme transféré
+              </button>
+              <button onClick={() => setShowExpelConfirm(true)}
+                className="px-3 py-1.5 border border-red-200 text-red-500 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors">
+                Expulser l'élève
+              </button>
+            </div>
           )}
         </div>
 
@@ -284,6 +300,11 @@ export default function StudentDetailPage() {
           <div className="flex items-center gap-2 px-4 py-3 bg-red-50 rounded-lg">
             <span className="text-red-500 text-sm font-medium">Élève expulsé</span>
             <span className="text-xs text-red-400">— Ne compte plus dans les effectifs ni les classements</span>
+          </div>
+        ) : student.status === 'transferred' ? (
+          <div className="flex items-center gap-2 px-4 py-3 bg-blue-50 rounded-lg">
+            <span className="text-blue-500 text-sm font-medium">Élève transféré</span>
+            <span className="text-xs text-blue-400">— Ne compte plus dans les effectifs ni les classements</span>
           </div>
         ) : (
           <>
@@ -451,6 +472,29 @@ export default function StudentDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Transfer Out (left for another school) Confirmation Modal */}
+      {showTransferOutConfirm && (
+        <ConfirmModal
+          title="Marquer comme transféré"
+          message="L'élève a quitté l'établissement pour une autre école. Pour confirmer, saisissez le matricule de l'élève."
+          requireMatch={student.matricule}
+          confirmLabel="Confirmer le transfert"
+          savingLabel="Enregistrement..."
+          saving={transferringOut}
+          onCancel={() => setShowTransferOutConfirm(false)}
+          onConfirm={confirmTransferOut}
+        >
+          <div className="bg-blue-50 rounded-lg px-4 py-3">
+            <p className="font-medium text-steel-800">{student.full_name}</p>
+            <p className="text-xs text-steel-500 mt-0.5">{enrollment?.classroom_label}</p>
+            <p className="text-xs font-mono text-steel-600 mt-1">Matricule: <strong>{student.matricule || '—'}</strong></p>
+            <p className="text-xs text-blue-500 mt-2">
+              Ne comptera plus dans les effectifs ni les classements. Pensez à enregistrer un éventuel remboursement dans Dépenses.
+            </p>
+          </div>
+        </ConfirmModal>
       )}
 
       {/* Transfer Modal */}
