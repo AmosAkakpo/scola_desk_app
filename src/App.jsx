@@ -30,7 +30,11 @@ import FinanceReportPage from './pages/finance/FinanceReportPage'
 import FinanceSettingsPage from './pages/finance/FinanceSettingsPage'
 import SubscriptionPage from './pages/finance/SubscriptionPage'
 import AttendancePage from './pages/finance/AttendancePage'
-import SettingsPage from './pages/settings/SettingsPage'
+import SettingsLayout from './pages/settings/SettingsLayout'
+import SchoolSettingsPage from './pages/settings/SchoolSettingsPage'
+import BulletinSettingsPage from './pages/settings/BulletinSettingsPage'
+import StructureSettingsPage from './pages/settings/StructureSettingsPage'
+import AssignmentsSettingsPage from './pages/settings/AssignmentsSettingsPage'
 import SyncPage from './pages/settings/SyncPage'
 import UsersPage from './pages/settings/UsersPage'
 import api from './utils/api'
@@ -131,7 +135,12 @@ function ProtectedApp({ schoolInfo }) {
           <Route path="/finance/settings" element={<FinanceSettingsPage />} />
           <Route path="/finance/subscription" element={<SubscriptionPage />} />
           <Route path="/finance/attendance" element={<AttendancePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<SettingsLayout />}>
+            <Route index element={<SchoolSettingsPage />} />
+            <Route path="bulletins" element={<BulletinSettingsPage />} />
+            <Route path="structure" element={<StructureSettingsPage />} />
+            <Route path="affectations" element={<AssignmentsSettingsPage />} />
+          </Route>
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
