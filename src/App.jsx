@@ -32,6 +32,7 @@ import SubscriptionPage from './pages/finance/SubscriptionPage'
 import AttendancePage from './pages/finance/AttendancePage'
 import SettingsPage from './pages/settings/SettingsPage'
 import SyncPage from './pages/settings/SyncPage'
+import UsersPage from './pages/settings/UsersPage'
 import api from './utils/api'
 import './App.css'
 
@@ -132,6 +133,7 @@ function ProtectedApp({ schoolInfo }) {
           <Route path="/finance/attendance" element={<AttendancePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/sync" element={<SyncPage />} />
+          <Route path="/users" element={<UsersPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>
