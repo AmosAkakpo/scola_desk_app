@@ -19,7 +19,7 @@ export default function RestorePage({ info, onDone, onSkip }) {
   async function startRestore() {
     setError('')
     try {
-      await api.post('/api/restore/start', { sync_uid: info.sync_uid, chunk_count: info.chunk_count })
+      await api.post('/api/restore/start', { sync_uid: info.sync_uid, chunk_count: info.chunk_count, synced_at: info.synced_at })
       setPhase('running')
       pollRef.current = setInterval(async () => {
         try {

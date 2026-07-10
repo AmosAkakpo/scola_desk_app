@@ -51,7 +51,7 @@ function insertChunk(db, tableName, rows) {
   return rows.length
 }
 
-async function runRestore(syncUid, totalChunks) {
+async function runRestore(syncUid, totalChunks, syncedAt) {
   const db = getDb()
   const creds = getCredentials(db)
   let recordsRestored = 0
@@ -85,6 +85,17 @@ async function runRestore(syncUid, totalChunks) {
       running.currentLabel = TABLE_LABELS[chunk.table_name] || chunk.table_name
       recordsRestored += insertChunk(db, chunk.table_name, chunk.rows || [])
     }
+
+    // sync_log itself is never backed up (append-only local audit trail,
+    // excluded from sync by design) -- so a fresh restore leaves it empty
+    // and the local Synchronisation page would show "Jamais" even though
+    // the school clearly has synced before. Seed one row reflecting the
+    // backup's actual origin so the UI has a real reference point.
+    db.prepare(`
+      INSERT INTO sync_log (sync_uid, sync_type, status, completed_at, records_sent, checkpoint, total_chunks)
+      VALUES (?, 'full', 'success', ?, ?, ?, ?)
+    `).run(syncUid, syncedAt || new Date().toISOString(), recordsRestored, totalChunks, totalChunks)
+    db.prepare("UPDATE license_state SET last_sync_at = ?").run(syncedAt || new Date().toISOString())
 
     lastResult = { status: 'success', records_restored: recordsRestored, finished_at: new Date().toISOString() }
   } catch (err) {
@@ -132,7 +143,7 @@ router.post('/start', async (req, res) => {
   const creds = getCredentials(db)
   if (!creds) return res.status(400).json({ error: 'NOT_ACTIVATED', message: 'Activez la licence avant de restaurer' })
 
-  const { sync_uid, chunk_count } = req.body || {}
+  const { sync_uid, chunk_count, synced_at } = req.body || {}
   if (!sync_uid || !chunk_count) {
     return res.status(400).json({ error: 'MISSING_FIELDS', message: 'sync_uid et chunk_count requis' })
   }
@@ -140,7 +151,7 @@ router.post('/start', async (req, res) => {
   running = { currentChunk: 0, totalChunks: chunk_count, currentLabel: '' }
   lastResult = null
 
-  runRestore(sync_uid, chunk_count).catch(err => {
+  runRestore(sync_uid, chunk_count, synced_at).catch(err => {
     console.error('[RESTORE] Unhandled runner error', err)
     running = null
   })
