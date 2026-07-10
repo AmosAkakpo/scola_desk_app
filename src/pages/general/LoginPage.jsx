@@ -44,7 +44,7 @@ export default function LoginPage({ onLogin }) {
             <label className="block text-sm text-steel-400 mb-1.5">Nom d'utilisateur</label>
             <input type="text" value={username} onChange={e => setUsername(e.target.value)} required autoFocus
               className="w-full px-3 py-2.5 bg-steel-800 border border-steel-700 rounded-lg text-steel-200 placeholder-steel-500 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand text-sm"
-              placeholder="admin" />
+              placeholder="Nom d'utilisateur" />
           </div>
           <div>
             <label className="block text-sm text-steel-400 mb-1.5">Mot de passe</label>
