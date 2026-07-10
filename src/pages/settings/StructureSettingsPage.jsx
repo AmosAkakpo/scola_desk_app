@@ -1,27 +1,47 @@
 import { useState, useEffect } from 'react'
 import api from '../../utils/api'
-import { useSettingsMsg } from './settingsShared'
+import ConfirmModal from '../../components/ConfirmModal'
+import { eq, useSettingsMsg, SaveConfirmModal } from './settingsShared'
 
 // Structure académique: niveaux, classes, matières + configuration
 // par niveau (évaluations, coefficients).
+// Every mutation goes through an explicit Enregistrer + the app's confirm
+// popup, reverting to the last-saved values on Annuler — no instant saves.
 export default function StructureSettingsPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [assessConfigs, setAssessConfigs] = useState({})
+  const [origAssessConfigs, setOrigAssessConfigs] = useState({})
   const [savingAssess, setSavingAssess] = useState(false)
   const [tab, setTab] = useState('levels')
   const [msg, showMsg] = useSettingsMsg()
+  const [confirm, setConfirm] = useState({ show: false, label: '', onConfirm: null, onCancel: null })
+
+  // Coefficients tab: pending (unsaved) edits keyed by level_subject id
+  const [coefLevelId, setCoefLevelId] = useState('')
+  const [coefEdits, setCoefEdits] = useState({})
+  const [savingCoefs, setSavingCoefs] = useState(false)
 
   function loadData() {
     api.get('/api/settings/academic').then(res => {
       setData(res.data)
-      setAssessConfigs(res.data.assess_configs || {})
+      const cfgs = res.data.assess_configs || {}
+      setAssessConfigs(cfgs)
+      setOrigAssessConfigs(JSON.parse(JSON.stringify(cfgs)))
+      setCoefEdits({})
       setLoading(false)
     })
   }
 
   useEffect(() => { loadData() }, [])
 
+  function askConfirm(label, hasChanged, fn, revertFn) {
+    if (!hasChanged) { showMsg('Aucune modification à enregistrer'); return }
+    setConfirm({ show: true, label, onConfirm: fn, onCancel: revertFn })
+  }
+  function closeConfirm() { setConfirm({ show: false, label: '', onConfirm: null, onCancel: null }) }
+
+  // ─── Évaluations ───────────────────────────────────────────
   function updateAssessConfig(levelId, field, value) {
     setAssessConfigs(prev => ({ ...prev, [levelId]: { ...prev[levelId], [field]: parseInt(value) || 0 } }))
   }
@@ -30,12 +50,27 @@ export default function StructureSettingsPage() {
     setSavingAssess(true)
     const configs = Object.entries(assessConfigs).map(([levelId, cfg]) => ({ level_id: parseInt(levelId), ...cfg }))
     await api.put('/api/settings/assessment-config', { configs })
+    setOrigAssessConfigs(JSON.parse(JSON.stringify(assessConfigs)))
     setSavingAssess(false)
     showMsg('Configuration des évaluations enregistrée')
   }
 
-  async function updateCoefficient(lsId, newCoef) {
-    await api.put(`/api/settings/level-subject/${lsId}`, { coefficient: parseInt(newCoef) || 1 })
+  // ─── Coefficients (batched) ────────────────────────────────
+  const levelsWithSubjects = (data?.levels || []).filter(l => (data?.level_subjects || []).some(ls => ls.level_id === l.id))
+  const activeCoefLevelId = coefLevelId || levelsWithSubjects[0]?.id || ''
+  const coefSubjects = (data?.level_subjects || []).filter(ls => ls.level_id === parseInt(activeCoefLevelId))
+  const coefHasChanges = coefSubjects.some(ls => coefEdits[ls.id] !== undefined && coefEdits[ls.id] !== ls.coefficient)
+
+  async function saveCoefficients() {
+    setSavingCoefs(true)
+    for (const ls of coefSubjects) {
+      const edited = coefEdits[ls.id]
+      if (edited !== undefined && edited !== ls.coefficient) {
+        await api.put(`/api/settings/level-subject/${ls.id}`, { coefficient: edited })
+      }
+    }
+    setSavingCoefs(false)
+    showMsg('Coefficients enregistrés')
     loadData()
   }
 
@@ -67,7 +102,9 @@ export default function StructureSettingsPage() {
             <div>
               <div className="flex items-center justify-between mb-4">
                 <p className="text-xs text-steel-500">Nombre d'évaluations par trimestre et par niveau</p>
-                <button onClick={saveAssessConfigs} disabled={savingAssess}
+                <button
+                  onClick={() => askConfirm('Évaluations', !eq(assessConfigs, origAssessConfigs), saveAssessConfigs, () => setAssessConfigs(JSON.parse(JSON.stringify(origAssessConfigs))))}
+                  disabled={savingAssess}
                   className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium">
                   {savingAssess ? 'Enregistrement...' : 'Enregistrer'}
                 </button>
@@ -110,36 +147,53 @@ export default function StructureSettingsPage() {
             </div>
           )}
 
-          {/* Coefficients tab */}
+          {/* Coefficients tab — level dropdown + batched save */}
           {tab === 'coefficients' && (
             <div>
-              <p className="text-xs text-steel-500 mb-4">Modifier les coefficients par matière et par niveau. Les changements sont immédiats.</p>
-              {data.levels?.map(l => {
-                const subs = data.level_subjects?.filter(ls => ls.level_id === l.id) || []
-                if (subs.length === 0) return null
-                return (
-                  <div key={l.id} className="mb-4">
-                    <p className="text-xs font-medium text-steel-700 mb-2">{l.name}</p>
-                    <div className="space-y-1">
-                      {subs.map(ls => (
-                        <div key={ls.id} className="flex items-center gap-3">
-                          <span className="text-xs text-steel-600 w-48">{ls.subject_name}</span>
-                          <select value={ls.coefficient} onChange={e => updateCoefficient(ls.id, e.target.value)}
-                            className="w-14 px-1 py-1 border border-steel-200 rounded text-xs text-center focus:outline-none focus:border-brand bg-white">
-                            {[1,2,3,4,5,6].map(c => <option key={c} value={c}>{c}</option>)}
-                          </select>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
+              <div className="flex items-center justify-between mb-4 gap-3">
+                <div className="flex items-center gap-3">
+                  <label className="text-xs text-steel-500">Niveau :</label>
+                  <select value={activeCoefLevelId}
+                    onChange={e => { setCoefLevelId(e.target.value); setCoefEdits({}) }}
+                    className="px-3 py-1.5 border border-steel-200 rounded-lg text-xs bg-white focus:outline-none focus:border-brand">
+                    {levelsWithSubjects.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+                </div>
+                <button
+                  onClick={() => askConfirm('Coefficients', coefHasChanges, saveCoefficients, () => setCoefEdits({}))}
+                  disabled={savingCoefs}
+                  className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium">
+                  {savingCoefs ? 'Enregistrement...' : 'Enregistrer'}
+                </button>
+              </div>
+              <p className="text-xs text-steel-500 mb-3">Les changements ne sont appliqués qu'après confirmation.</p>
+              {coefSubjects.length === 0 ? (
+                <p className="text-sm text-steel-400 text-center py-4">Aucune matière pour ce niveau</p>
+              ) : (
+                <div className="space-y-1">
+                  {coefSubjects.map(ls => {
+                    const current = coefEdits[ls.id] ?? ls.coefficient
+                    const changed = coefEdits[ls.id] !== undefined && coefEdits[ls.id] !== ls.coefficient
+                    return (
+                      <div key={ls.id} className="flex items-center gap-3">
+                        <span className="text-xs text-steel-600 w-48">{ls.subject_name}</span>
+                        <select value={current}
+                          onChange={e => setCoefEdits(prev => ({ ...prev, [ls.id]: parseInt(e.target.value) || 1 }))}
+                          className={`w-14 px-1 py-1 border rounded text-xs text-center focus:outline-none focus:border-brand bg-white ${changed ? 'border-brand text-brand font-medium' : 'border-steel-200'}`}>
+                          {[1,2,3,4,5,6].map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        {changed && <span className="text-xs text-steel-400">était {ls.coefficient}</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
           {/* Levels tab */}
           {tab === 'levels' && (
-            <LevelsManager onUpdate={loadData} showMsg={showMsg} />
+            <LevelsManager onUpdate={loadData} showMsg={showMsg} askConfirm={askConfirm} />
           )}
 
           {/* Classrooms tab */}
@@ -153,20 +207,25 @@ export default function StructureSettingsPage() {
           )}
         </div>
       </div>
+
+      <SaveConfirmModal confirm={confirm} onClose={closeConfirm} />
     </div>
   )
 }
 
 // ─── Levels Manager ──────────────────────────────────────────
-function LevelsManager({ onUpdate, showMsg }) {
+function LevelsManager({ onUpdate, showMsg, askConfirm }) {
   const [levels, setLevels] = useState([])
   const [selected, setSelected] = useState([])
+  const [origSelected, setOrigSelected] = useState([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     api.get('/api/settings/levels').then(res => {
       setLevels(res.data.levels || [])
-      setSelected((res.data.levels || []).filter(l => l.is_active === 1).map(l => l.id))
+      const active = (res.data.levels || []).filter(l => l.is_active === 1).map(l => l.id)
+      setSelected(active)
+      setOrigSelected([...active])
     })
   }, [])
 
@@ -175,10 +234,13 @@ function LevelsManager({ onUpdate, showMsg }) {
   async function save() {
     setSaving(true)
     await api.put('/api/settings/levels', { level_ids: selected })
+    setOrigSelected([...selected])
     setSaving(false)
     showMsg('Niveaux mis à jour')
     onUpdate()
   }
+
+  const hasChanged = JSON.stringify([...selected].sort()) !== JSON.stringify([...origSelected].sort())
 
   const groups = [
     { title: 'Primaire', items: levels.filter(l => l.level_code <= 7) },
@@ -190,7 +252,8 @@ function LevelsManager({ onUpdate, showMsg }) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-xs text-steel-500">Activez ou désactivez les niveaux enseignés par votre école.</p>
-        <button onClick={save} disabled={saving} className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium">
+        <button onClick={() => askConfirm('Niveaux', hasChanged, save, () => setSelected([...origSelected]))} disabled={saving}
+          className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium">
           {saving ? 'Enregistrement...' : 'Enregistrer'}
         </button>
       </div>
@@ -216,13 +279,19 @@ function ClassroomsManager({ data, onUpdate, showMsg }) {
   const [form, setForm] = useState({ label: '', level_id: '', serie_id: '', capacity: 50 })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [confirmAdd, setConfirmAdd] = useState(false)
 
   const activeLevels = data?.levels || []
 
-  async function handleAdd(e) {
+  function requestAdd(e) {
     e.preventDefault()
     if (!form.label.trim() || !form.level_id) { setError('Nom et niveau requis'); return }
-    setSaving(true); setError('')
+    setError('')
+    setConfirmAdd(true)
+  }
+
+  async function handleAdd() {
+    setSaving(true)
     try {
       await api.post('/api/settings/classrooms', { label: form.label, level_id: parseInt(form.level_id), serie_id: form.serie_id ? parseInt(form.serie_id) : null, capacity: form.capacity })
       setForm({ label: '', level_id: '', serie_id: '', capacity: 50 })
@@ -230,12 +299,13 @@ function ClassroomsManager({ data, onUpdate, showMsg }) {
       onUpdate()
     } catch (err) { setError(err.response?.data?.message || 'Erreur') }
     setSaving(false)
+    setConfirmAdd(false)
   }
 
   return (
     <div>
       <p className="text-xs text-steel-500 mb-4">Ajouter une nouvelle classe pour l'année en cours. Les modèles d'évaluation seront générés automatiquement.</p>
-      <form onSubmit={handleAdd} className="grid grid-cols-4 gap-3 items-end">
+      <form onSubmit={requestAdd} className="grid grid-cols-4 gap-3 items-end">
         <div>
           <label className="block text-xs text-steel-500 mb-1">Nom *</label>
           <input type="text" value={form.label} onChange={e => setForm(p => ({ ...p, label: e.target.value }))} placeholder="Ex: 6ème C"
@@ -260,6 +330,25 @@ function ClassroomsManager({ data, onUpdate, showMsg }) {
       </form>
       {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
       <p className="text-xs text-steel-400 mt-3">{data?.classrooms?.length || 0} classe(s) existante(s). Gérez les classes existantes depuis la page Classes.</p>
+
+      {confirmAdd && (
+        <ConfirmModal
+          title="Ajouter la classe"
+          message="Les modèles d'évaluation seront générés automatiquement pour cette classe."
+          confirmLabel="Ajouter"
+          saving={saving}
+          savingLabel="Ajout..."
+          onCancel={() => setConfirmAdd(false)}
+          onConfirm={handleAdd}
+        >
+          <div className="bg-steel-50 rounded-lg px-4 py-3 text-sm">
+            <p className="font-medium text-steel-800">{form.label}</p>
+            <p className="text-xs text-steel-500 mt-0.5">
+              {activeLevels.find(l => l.id === parseInt(form.level_id))?.name || '—'} · capacité {form.capacity}
+            </p>
+          </div>
+        </ConfirmModal>
+      )}
     </div>
   )
 }
@@ -269,6 +358,8 @@ function SubjectsManager({ data, onUpdate, showMsg }) {
   const [newSubject, setNewSubject] = useState({ name: '', short_code: '' })
   const [addToLevel, setAddToLevel] = useState({ level_id: '', serie_id: '', subject_id: '', coefficient: 1 })
   const [saving, setSaving] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState(null) // { id, subject_name, level_name }
+  const [removing, setRemoving] = useState(false)
 
   async function handleAddSubject(e) {
     e.preventDefault()
@@ -292,8 +383,11 @@ function SubjectsManager({ data, onUpdate, showMsg }) {
     onUpdate()
   }
 
-  async function handleRemoveFromLevel(lsId) {
-    await api.delete(`/api/settings/level-subject/${lsId}`)
+  async function confirmRemoveFromLevel() {
+    setRemoving(true)
+    await api.delete(`/api/settings/level-subject/${removeTarget.id}`)
+    setRemoving(false)
+    setRemoveTarget(null)
     showMsg('Matière retirée')
     onUpdate()
   }
@@ -351,7 +445,8 @@ function SubjectsManager({ data, onUpdate, showMsg }) {
                 {subs.map(ls => (
                   <span key={ls.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-steel-100 rounded text-xs text-steel-600">
                     {ls.subject_name} <span className="text-steel-400">(c{ls.coefficient})</span>
-                    <button onClick={() => handleRemoveFromLevel(ls.id)} className="text-red-400 hover:text-red-500 ml-0.5">×</button>
+                    <button onClick={() => setRemoveTarget({ id: ls.id, subject_name: ls.subject_name, level_name: l.name })}
+                      className="text-red-400 hover:text-red-500 ml-0.5">×</button>
                   </span>
                 ))}
               </div>
@@ -359,6 +454,24 @@ function SubjectsManager({ data, onUpdate, showMsg }) {
           )
         })}
       </div>
+
+      {removeTarget && (
+        <ConfirmModal
+          title="Retirer la matière du niveau"
+          message="La matière ne sera plus enseignée à ce niveau. Les notes déjà saisies ne seront plus visibles sur les bulletins de ce niveau."
+          danger
+          confirmLabel="Retirer"
+          saving={removing}
+          savingLabel="Retrait..."
+          onCancel={() => setRemoveTarget(null)}
+          onConfirm={confirmRemoveFromLevel}
+        >
+          <div className="bg-steel-50 rounded-lg px-4 py-3 text-sm">
+            <p className="font-medium text-steel-800">{removeTarget.subject_name}</p>
+            <p className="text-xs text-steel-500 mt-0.5">{removeTarget.level_name}</p>
+          </div>
+        </ConfirmModal>
+      )}
     </div>
   )
 }

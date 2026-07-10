@@ -1,10 +1,11 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
+// Affectations enseignants deliberately absent: assigning teachers lives on
+// the Classes page (Matières tab), which already has its own confirm flow.
 const SUB_NAV = [
   { to: '/settings', label: 'École', end: true },
   { to: '/settings/bulletins', label: 'Notes & bulletins' },
   { to: '/settings/structure', label: 'Structure académique' },
-  { to: '/settings/affectations', label: 'Affectations enseignants' },
 ]
 
 export default function SettingsLayout() {
