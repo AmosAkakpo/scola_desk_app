@@ -11,6 +11,13 @@ const PAYLOAD_SECRET = (process.env.LICENSE_PAYLOAD_SECRET || 'scoladesk-v1-secr
 // activation routes. It is inert once the school is configured (guard below).
 const TABLE_NAMES = new Set(SYNC_TABLES.map(t => t.name))
 
+// Synced for backup completeness but NEVER applied on restore: the backup's
+// license_state carries the DEAD PC's hardware fingerprint — overwriting the
+// freshly-activated row would make every later CAP call (sync, restore) fail
+// with HARDWARE_MISMATCH. The reissued/rebound license carries the same
+// pricing/expiry values, so nothing is lost by keeping the fresh row.
+const SKIP_ON_RESTORE = new Set(['license_state'])
+
 let running = null // { currentChunk, totalChunks, currentLabel }
 let lastResult = null // { status: 'success'|'failed', error, records_restored, finished_at }
 
@@ -66,6 +73,7 @@ async function runRestore(syncUid, totalChunks, syncedAt) {
     // are the only rows that exist.
     db.transaction(() => {
       for (let i = SYNC_TABLES.length - 1; i >= 0; i--) {
+        if (SKIP_ON_RESTORE.has(SYNC_TABLES[i].name)) continue
         db.prepare(`DELETE FROM ${SYNC_TABLES[i].name}`).run()
       }
     })()
@@ -83,6 +91,7 @@ async function runRestore(syncUid, totalChunks, syncedAt) {
         throw new Error(`Table inattendue dans la sauvegarde: ${chunk.table_name}`)
       }
       running.currentLabel = TABLE_LABELS[chunk.table_name] || chunk.table_name
+      if (SKIP_ON_RESTORE.has(chunk.table_name)) continue
       recordsRestored += insertChunk(db, chunk.table_name, chunk.rows || [])
     }
 
