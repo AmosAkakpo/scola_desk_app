@@ -201,12 +201,18 @@ router.get('/academic', requirePermission('students.view'), (req, res) => {
     assessConfigs[l.id] = row ? JSON.parse(row.value) : { interrogations: 4, devoirs: 1, compositions: 1, max_score: 20 }
   }
 
-  // Subject-level assignments
+  // Subject-level assignments — serie-aware: on has_serie levels each série
+  // has its own rows (e.g. SVT série C and SVT série D are distinct entries)
   const levelSubjects = db.prepare(`
-    SELECT ls.id, ls.level_id, ls.subject_id, ls.coefficient, s.name AS subject_name
-    FROM level_subjects ls JOIN subjects s ON s.id = ls.subject_id
-    WHERE ls.is_active = 1 ORDER BY ls.level_id, s.name
+    SELECT ls.id, ls.level_id, ls.subject_id, ls.serie_id, ls.coefficient,
+           s.name AS subject_name, se.name AS serie_name
+    FROM level_subjects ls
+    JOIN subjects s ON s.id = ls.subject_id
+    LEFT JOIN series se ON se.id = ls.serie_id
+    WHERE ls.is_active = 1 ORDER BY ls.level_id, se.name, s.name
   `).all()
+
+  const series = db.prepare('SELECT * FROM series ORDER BY level_id, name').all()
 
   // Teacher assignments
   const assignments = db.prepare(`
@@ -231,7 +237,7 @@ router.get('/academic', requirePermission('students.view'), (req, res) => {
 
   return res.json({
     academic_year: year, periode_type: periodeType, periode_count: periodeCount,
-    levels, assess_configs: assessConfigs, level_subjects: levelSubjects,
+    levels, series, assess_configs: assessConfigs, level_subjects: levelSubjects,
     assignments, classrooms, teachers, subjects,
   })
 })
@@ -301,10 +307,14 @@ router.put('/levels', requirePermission('students.edit'), (req, res) => {
 })
 
 // ─── GET /api/settings/levels — All levels with active state ─
+// Also carries series + total_rooms: this is the post-onboarding data source
+// for pages that used to call the (now sealed) /api/onboarding/classroom-data.
 router.get('/levels', requirePermission('students.view'), (req, res) => {
   const db = getDb()
   const levels = db.prepare('SELECT * FROM levels ORDER BY display_order').all()
-  return res.json({ levels })
+  const series = db.prepare('SELECT * FROM series ORDER BY level_id, name').all()
+  const totalRooms = db.prepare("SELECT value FROM app_settings WHERE key = 'total_rooms'").get()?.value || null
+  return res.json({ levels, series, total_rooms: totalRooms })
 })
 
 // ─── POST /api/settings/classrooms — Add classroom mid-year ──

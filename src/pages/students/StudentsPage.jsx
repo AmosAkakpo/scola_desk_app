@@ -52,7 +52,7 @@ export default function StudentsPage() {
   useEffect(() => {
     fetchStudents()
     api.get('/api/classrooms').then(r => setClassrooms(r.data.classrooms || [])).catch(() => {})
-    api.get('/api/onboarding/levels').then(r => setLevels((r.data.levels || []).filter(l => l.is_active === 1))).catch(() => {})
+    api.get('/api/settings/levels').then(r => setLevels((r.data.levels || []).filter(l => l.is_active === 1))).catch(() => {})
   }, [fetchStudents])
 
   async function downloadSummaryPdf() {

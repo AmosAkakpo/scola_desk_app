@@ -17,8 +17,11 @@ export default function StructureSettingsPage() {
   const [msg, showMsg] = useSettingsMsg()
   const [confirm, setConfirm] = useState({ show: false, label: '', onConfirm: null, onCancel: null })
 
-  // Coefficients tab: pending (unsaved) edits keyed by level_subject id
-  const [coefLevelId, setCoefLevelId] = useState('')
+  // Coefficients tab: pending (unsaved) edits keyed by level_subject id.
+  // Selection key is "levelId:serieId" — on has-séries levels each série has
+  // its own subject list (SVT série C ≠ SVT série D), so they are separate
+  // dropdown entries instead of being mixed under one level.
+  const [coefKey, setCoefKey] = useState('')
   const [coefEdits, setCoefEdits] = useState({})
   const [savingCoefs, setSavingCoefs] = useState(false)
 
@@ -56,9 +59,24 @@ export default function StructureSettingsPage() {
   }
 
   // ─── Coefficients (batched) ────────────────────────────────
-  const levelsWithSubjects = (data?.levels || []).filter(l => (data?.level_subjects || []).some(ls => ls.level_id === l.id))
-  const activeCoefLevelId = coefLevelId || levelsWithSubjects[0]?.id || ''
-  const coefSubjects = (data?.level_subjects || []).filter(ls => ls.level_id === parseInt(activeCoefLevelId))
+  // One dropdown entry per distinct (level, série) pair that has subjects:
+  // "6ème", "1ère — Série C", "1ère — Série D", "1ère — Tronc commun"...
+  const coefOptions = []
+  for (const l of (data?.levels || [])) {
+    const pairs = new Set((data?.level_subjects || []).filter(ls => ls.level_id === l.id).map(ls => ls.serie_id ?? 'null'))
+    for (const sid of pairs) {
+      const serie = sid === 'null' ? null : (data?.series || []).find(s => s.id === sid)
+      coefOptions.push({
+        key: `${l.id}:${sid}`,
+        label: sid === 'null' ? (l.has_serie === 1 ? `${l.name} — Tronc commun` : l.name) : `${l.name} — Série ${serie?.name || '?'}`,
+      })
+    }
+  }
+  const activeCoefKey = coefKey || coefOptions[0]?.key || ''
+  const [activeLevelId, activeSerieId] = activeCoefKey.split(':')
+  const coefSubjects = (data?.level_subjects || []).filter(ls =>
+    ls.level_id === parseInt(activeLevelId) && String(ls.serie_id ?? 'null') === activeSerieId
+  )
   const coefHasChanges = coefSubjects.some(ls => coefEdits[ls.id] !== undefined && coefEdits[ls.id] !== ls.coefficient)
 
   async function saveCoefficients() {
@@ -153,10 +171,10 @@ export default function StructureSettingsPage() {
               <div className="flex items-center justify-between mb-4 gap-3">
                 <div className="flex items-center gap-3">
                   <label className="text-xs text-steel-500">Niveau :</label>
-                  <select value={activeCoefLevelId}
-                    onChange={e => { setCoefLevelId(e.target.value); setCoefEdits({}) }}
+                  <select value={activeCoefKey}
+                    onChange={e => { setCoefKey(e.target.value); setCoefEdits({}) }}
                     className="px-3 py-1.5 border border-steel-200 rounded-lg text-xs bg-white focus:outline-none focus:border-brand">
-                    {levelsWithSubjects.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    {coefOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                   </select>
                 </div>
                 <button
@@ -193,7 +211,7 @@ export default function StructureSettingsPage() {
 
           {/* Levels tab */}
           {tab === 'levels' && (
-            <LevelsManager onUpdate={loadData} showMsg={showMsg} askConfirm={askConfirm} />
+            <LevelsManager onUpdate={loadData} showMsg={showMsg} askConfirm={askConfirm} series={data?.series || []} />
           )}
 
           {/* Classrooms tab */}
@@ -214,11 +232,24 @@ export default function StructureSettingsPage() {
 }
 
 // ─── Levels Manager ──────────────────────────────────────────
-function LevelsManager({ onUpdate, showMsg, askConfirm }) {
+function LevelsManager({ onUpdate, showMsg, askConfirm, series }) {
   const [levels, setLevels] = useState([])
   const [selected, setSelected] = useState([])
   const [origSelected, setOrigSelected] = useState([])
   const [saving, setSaving] = useState(false)
+  const [newSerie, setNewSerie] = useState({ level_id: '', name: '' })
+  const [addingSerie, setAddingSerie] = useState(false)
+
+  async function addSerie(e) {
+    e.preventDefault()
+    if (!newSerie.level_id || !newSerie.name.trim()) return
+    setAddingSerie(true)
+    await api.post('/api/settings/series', { level_id: parseInt(newSerie.level_id), name: newSerie.name.trim() })
+    setNewSerie(p => ({ ...p, name: '' }))
+    setAddingSerie(false)
+    showMsg('Série ajoutée')
+    onUpdate()
+  }
 
   useEffect(() => {
     api.get('/api/settings/levels').then(res => {
@@ -270,6 +301,42 @@ function LevelsManager({ onUpdate, showMsg, askConfirm }) {
           </div>
         </div>
       ))}
+
+      {/* Séries per has_serie level */}
+      <div className="mt-6 pt-4 border-t border-steel-100">
+        <p className="text-xs font-medium text-steel-700 mb-2">Séries (2nde, 1ère, Terminale)</p>
+        <div className="space-y-2 mb-3">
+          {levels.filter(l => l.has_serie === 1 && selected.includes(l.id)).map(l => {
+            const levelSeries = series.filter(s => s.level_id === l.id)
+            return (
+              <div key={l.id} className="flex items-center gap-3">
+                <span className="text-xs text-steel-600 w-20">{l.name}</span>
+                <div className="flex flex-wrap gap-1">
+                  {levelSeries.length === 0
+                    ? <span className="text-xs text-steel-400 italic">Aucune série</span>
+                    : levelSeries.map(s => (
+                      <span key={s.id} className="px-2 py-0.5 bg-steel-100 rounded text-xs text-steel-600">Série {s.name}</span>
+                    ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <form onSubmit={addSerie} className="flex gap-2 items-end">
+          <select value={newSerie.level_id} onChange={e => setNewSerie(p => ({ ...p, level_id: e.target.value }))}
+            className="px-2 py-1.5 border border-steel-200 rounded-lg text-xs bg-white focus:outline-none focus:border-brand">
+            <option value="">Niveau</option>
+            {levels.filter(l => l.has_serie === 1 && selected.includes(l.id)).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+          <input type="text" value={newSerie.name} onChange={e => setNewSerie(p => ({ ...p, name: e.target.value }))}
+            placeholder="Ex: A1, B, C, D" maxLength={4}
+            className="w-28 px-2 py-1.5 border border-steel-200 rounded-lg text-xs focus:outline-none focus:border-brand" />
+          <button type="submit" disabled={addingSerie || !newSerie.level_id || !newSerie.name.trim()}
+            className="px-3 py-1.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium">
+            {addingSerie ? 'Ajout...' : 'Ajouter la série'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }
@@ -282,10 +349,14 @@ function ClassroomsManager({ data, onUpdate, showMsg }) {
   const [confirmAdd, setConfirmAdd] = useState(false)
 
   const activeLevels = data?.levels || []
+  const levelSeries = (data?.series || []).filter(s => s.level_id === parseInt(form.level_id))
 
   function requestAdd(e) {
     e.preventDefault()
     if (!form.label.trim() || !form.level_id) { setError('Nom et niveau requis'); return }
+    // A classroom on a has-séries level without a série would get ZERO
+    // subjects/templates (subjects there are all série-specific).
+    if (levelSeries.length > 0 && !form.serie_id) { setError('Sélectionnez une série pour ce niveau'); return }
     setError('')
     setConfirmAdd(true)
   }
@@ -305,7 +376,7 @@ function ClassroomsManager({ data, onUpdate, showMsg }) {
   return (
     <div>
       <p className="text-xs text-steel-500 mb-4">Ajouter une nouvelle classe pour l'année en cours. Les modèles d'évaluation seront générés automatiquement.</p>
-      <form onSubmit={requestAdd} className="grid grid-cols-4 gap-3 items-end">
+      <form onSubmit={requestAdd} className="grid grid-cols-5 gap-3 items-end">
         <div>
           <label className="block text-xs text-steel-500 mb-1">Nom *</label>
           <input type="text" value={form.label} onChange={e => setForm(p => ({ ...p, label: e.target.value }))} placeholder="Ex: 6ème C"
@@ -317,6 +388,15 @@ function ClassroomsManager({ data, onUpdate, showMsg }) {
             className="w-full px-3 py-1.5 border border-steel-200 rounded-lg text-xs focus:outline-none focus:border-brand bg-white">
             <option value="">—</option>
             {activeLevels.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-steel-500 mb-1">Série {levelSeries.length > 0 && '*'}</label>
+          <select value={form.serie_id} onChange={e => setForm(p => ({ ...p, serie_id: e.target.value }))}
+            disabled={levelSeries.length === 0}
+            className="w-full px-3 py-1.5 border border-steel-200 rounded-lg text-xs focus:outline-none focus:border-brand bg-white disabled:bg-steel-50 disabled:text-steel-400">
+            <option value="">{levelSeries.length === 0 ? '—' : '— Sélectionner —'}</option>
+            {levelSeries.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
         <div>
@@ -344,7 +424,9 @@ function ClassroomsManager({ data, onUpdate, showMsg }) {
           <div className="bg-steel-50 rounded-lg px-4 py-3 text-sm">
             <p className="font-medium text-steel-800">{form.label}</p>
             <p className="text-xs text-steel-500 mt-0.5">
-              {activeLevels.find(l => l.id === parseInt(form.level_id))?.name || '—'} · capacité {form.capacity}
+              {activeLevels.find(l => l.id === parseInt(form.level_id))?.name || '—'}
+              {form.serie_id && ` · Série ${levelSeries.find(s => s.id === parseInt(form.serie_id))?.name || ''}`}
+              {' '}· capacité {form.capacity}
             </p>
           </div>
         </ConfirmModal>
@@ -360,6 +442,8 @@ function SubjectsManager({ data, onUpdate, showMsg }) {
   const [saving, setSaving] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null) // { id, subject_name, level_name }
   const [removing, setRemoving] = useState(false)
+
+  const assignSeries = (data?.series || []).filter(s => s.level_id === addToLevel.level_id)
 
   async function handleAddSubject(e) {
     e.preventDefault()
@@ -414,11 +498,18 @@ function SubjectsManager({ data, onUpdate, showMsg }) {
       <div>
         <p className="text-xs font-medium text-steel-700 mb-2">Assigner une matière à un niveau</p>
         <form onSubmit={handleAssignToLevel} className="flex gap-2 items-end flex-wrap">
-          <select value={addToLevel.level_id} onChange={e => setAddToLevel(p => ({ ...p, level_id: parseInt(e.target.value) || '' }))}
+          <select value={addToLevel.level_id} onChange={e => setAddToLevel(p => ({ ...p, level_id: parseInt(e.target.value) || '', serie_id: '' }))}
             className="px-2 py-1.5 border border-steel-200 rounded-lg text-xs bg-white focus:outline-none focus:border-brand">
             <option value="">Niveau</option>
             {data?.levels?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
+          {assignSeries.length > 0 && (
+            <select value={addToLevel.serie_id} onChange={e => setAddToLevel(p => ({ ...p, serie_id: parseInt(e.target.value) || '' }))}
+              className="px-2 py-1.5 border border-steel-200 rounded-lg text-xs bg-white focus:outline-none focus:border-brand">
+              <option value="">Toutes les séries (commun)</option>
+              {assignSeries.map(s => <option key={s.id} value={s.id}>Série {s.name}</option>)}
+            </select>
+          )}
           <select value={addToLevel.subject_id} onChange={e => setAddToLevel(p => ({ ...p, subject_id: parseInt(e.target.value) || '' }))}
             className="px-2 py-1.5 border border-steel-200 rounded-lg text-xs bg-white focus:outline-none focus:border-brand">
             <option value="">Matière</option>
@@ -444,8 +535,10 @@ function SubjectsManager({ data, onUpdate, showMsg }) {
               <div className="flex flex-wrap gap-1">
                 {subs.map(ls => (
                   <span key={ls.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-steel-100 rounded text-xs text-steel-600">
-                    {ls.subject_name} <span className="text-steel-400">(c{ls.coefficient})</span>
-                    <button onClick={() => setRemoveTarget({ id: ls.id, subject_name: ls.subject_name, level_name: l.name })}
+                    {ls.subject_name}
+                    {ls.serie_name && <span className="text-brand-600 font-medium">{ls.serie_name}</span>}
+                    <span className="text-steel-400">(c{ls.coefficient})</span>
+                    <button onClick={() => setRemoveTarget({ id: ls.id, subject_name: ls.subject_name, level_name: l.name + (ls.serie_name ? ` — Série ${ls.serie_name}` : '') })}
                       className="text-red-400 hover:text-red-500 ml-0.5">×</button>
                   </span>
                 ))}

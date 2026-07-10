@@ -17,7 +17,7 @@ export default function ClassroomsPage() {
     const res = await api.get('/api/classrooms')
     setClassrooms(res.data.classrooms || [])
     setLoading(false)
-    api.get('/api/onboarding/classroom-data').then(r => setTotalRooms(r.data.total_rooms || null)).catch(() => {})
+    api.get('/api/settings/levels').then(r => setTotalRooms(r.data.total_rooms || null)).catch(() => {})
   }
 
   useEffect(() => { fetchClassrooms() }, [])
@@ -151,10 +151,13 @@ function AddClassroomModal({ onClose, onDone }) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    api.get('/api/onboarding/classroom-data').then(res => {
-      setLevels(res.data.levels || [])
+    // /api/onboarding/* is sealed once the school is configured — this data
+    // now comes from the settings route.
+    api.get('/api/settings/levels').then(res => {
+      const active = (res.data.levels || []).filter(l => l.is_active === 1)
+      setLevels(active)
       setSeries(res.data.series || [])
-      if (res.data.levels?.length > 0) setForm(p => ({ ...p, level_id: res.data.levels[0].id }))
+      if (active.length > 0) setForm(p => ({ ...p, level_id: active[0].id }))
     })
   }, [])
 
@@ -163,6 +166,9 @@ function AddClassroomModal({ onClose, onDone }) {
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.label.trim() || !form.level_id) return
+    // A classroom on a has-séries level without a série would get ZERO
+    // subjects/templates (subjects there are all série-specific).
+    if (levelSeries.length > 0 && !form.serie_id) { setError('Sélectionnez une série pour ce niveau'); return }
     setError(''); setSaving(true)
     try {
       await api.post('/api/classrooms', {
@@ -198,10 +204,10 @@ function AddClassroomModal({ onClose, onDone }) {
           </div>
           {levelSeries.length > 0 && (
             <div>
-              <label className="block text-xs text-steel-500 mb-1">Série</label>
-              <select value={form.serie_id} onChange={e => setForm(p => ({ ...p, serie_id: e.target.value }))}
+              <label className="block text-xs text-steel-500 mb-1">Série <span className="text-red-500">*</span></label>
+              <select required value={form.serie_id} onChange={e => setForm(p => ({ ...p, serie_id: e.target.value }))}
                 className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand bg-white">
-                <option value="">— Aucune —</option>
+                <option value="">— Sélectionner —</option>
                 {levelSeries.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
