@@ -46,7 +46,9 @@ const SYNC_TABLES = [
   { name: 'other_revenues', pageSize: 500 },
   { name: 'revenue_categories', pageSize: 500 },
   { name: 'ledger_transactions', pageSize: 500 },
-  { name: 'report_card_snapshots', pageSize: 200 },
+  // 50/page (not 200): each row embeds a full bulletin JSON (~10-30KB) --
+  // 200/page could exceed Vercel's ~4.5MB request body limit at scale.
+  { name: 'report_card_snapshots', pageSize: 50 },
   { name: 'promotion_runs', pageSize: 500 },
   { name: 'promotion_details', pageSize: 500 },
 ]
@@ -144,7 +146,10 @@ async function runSync(syncUid) {
       running.currentTask = i
       running.currentLabel = task.label
 
-      const rows = db.prepare(`SELECT * FROM ${task.table} LIMIT ? OFFSET ?`).all(task.limit, task.offset)
+      // ORDER BY rowid: without it SQLite guarantees no stable order across
+      // pages -- a row inserted mid-sync (secretary on the LAN, while the
+      // admin syncs) could silently duplicate or skip rows at page borders.
+      const rows = db.prepare(`SELECT * FROM ${task.table} ORDER BY rowid LIMIT ? OFFSET ?`).all(task.limit, task.offset)
 
       await postToCap({
         action: 'chunk',
