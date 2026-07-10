@@ -56,6 +56,75 @@ function StudentCount({ actual = 0, allowed = 0 }) {
   )
 }
 
+// Top-bar reveal panel: every URL a secondary PC's browser can use.
+// Hostname first (the stable printable link), IPs as fallback.
+function NetworkPanel() {
+  const [open, setOpen] = useState(false)
+  const [info, setInfo] = useState(null)
+  const [copied, setCopied] = useState('')
+
+  function toggle() {
+    if (!open && !info) {
+      api.get('/api/settings/network').then(res => setInfo(res.data)).catch(() => {})
+    }
+    setOpen(!open)
+  }
+
+  function copy(url) {
+    navigator.clipboard?.writeText(url).then(() => {
+      setCopied(url)
+      setTimeout(() => setCopied(''), 1500)
+    }).catch(() => {})
+  }
+
+  const urls = info
+    ? [`http://${info.hostname}:${info.port}`, ...info.ips.map(ip => `http://${ip}:${info.port}`)]
+    : []
+
+  return (
+    <div className="relative">
+      <button onClick={toggle} title="Accès depuis d'autres postes"
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors text-xs ${
+          open ? 'text-brand bg-brand-50' : 'text-steel-400 hover:text-steel-700 hover:bg-steel-100'
+        }`}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+        </svg>
+        Multi-postes
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-9 bg-white border border-steel-200 rounded-xl shadow-lg z-30 w-80 p-4">
+            <p className="text-xs font-semibold text-steel-700 mb-1">Accès depuis d'autres postes</p>
+            <p className="text-[11px] text-steel-500 mb-3">
+              Ouvrez l'une de ces adresses dans un navigateur (Chrome, Edge) sur un autre PC connecté au même réseau Wi-Fi.
+            </p>
+            {!info ? (
+              <p className="text-xs text-steel-400 py-2">Chargement...</p>
+            ) : (
+              <div className="space-y-1.5">
+                {urls.map((url, i) => (
+                  <div key={url} className="flex items-center justify-between gap-2 bg-steel-50 rounded-lg px-3 py-2">
+                    <span className={`font-mono text-xs ${i === 0 ? 'text-steel-900 font-semibold' : 'text-steel-600'}`}>{url}</span>
+                    <button onClick={() => copy(url)}
+                      className="text-[11px] text-brand hover:text-brand-600 font-medium shrink-0">
+                      {copied === url ? 'Copié ✓' : 'Copier'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-steel-400 mt-3">
+              Si la connexion échoue, autorisez ScolaDesk dans le pare-feu Windows de ce PC.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Layout({ schoolInfo }) {
   const { user, logout, hasPermission, idleWarning, stayLoggedIn } = useAuth()
   const [actualStudents, setActualStudents] = useState(0)
@@ -188,16 +257,19 @@ export default function Layout({ schoolInfo }) {
             )}
             <StudentCount actual={actualStudents} allowed={schoolInfo?.allowed_students} />
           </div>
-          <button
-            onClick={() => window.location.reload()}
-            title="Actualiser"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-steel-400 hover:text-steel-700 hover:bg-steel-100 rounded-lg transition-colors text-xs"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Actualiser
-          </button>
+          <div className="flex items-center gap-1">
+            <NetworkPanel />
+            <button
+              onClick={() => window.location.reload()}
+              title="Actualiser"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-steel-400 hover:text-steel-700 hover:bg-steel-100 rounded-lg transition-colors text-xs"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Actualiser
+            </button>
+          </div>
         </header>
 
         {/* Content */}

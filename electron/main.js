@@ -46,9 +46,12 @@ function createWindow() {
         titleBarStyle: 'default',
     })
 
+    // Production loads from the embedded Express server (which serves dist/)
+    // instead of file:// — same origin as the API, BrowserRouter deep links
+    // work, and it's the exact same URL LAN browser clients use.
     const url = isDev
         ? 'http://localhost:5173'
-        : `file://${path.join(__dirname, '../dist/index.html')}`
+        : 'http://localhost:3000'
 
     mainWindow.loadURL(url)
 

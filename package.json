@@ -30,6 +30,10 @@
       {
         "from": "server",
         "to": "server"
+      },
+      {
+        "from": "dist",
+        "to": "dist"
       }
     ],
     "win": {

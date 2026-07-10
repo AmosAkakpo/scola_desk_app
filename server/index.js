@@ -41,6 +41,26 @@ app.use('/api/sync', require('./routes/sync'))
 app.use('/api/restore', require('./routes/restore'))
 app.use('/api/users', require('./routes/users'))
 
+// ─── Static frontend (multi-poste LAN access) ───────────────
+// Serves the built React app so secondary PCs on the school's network can
+// use a plain browser at http://scoladesk:3000 (or http://<ip>:3000).
+// The Electron window loads the same URL in production. In dev, Vite (5173)
+// serves the UI and dist/ may not exist — hence the existence guard.
+const fs = require('fs')
+const distDir = path.join(__dirname, '../dist')
+if (fs.existsSync(distDir)) {
+    app.use(express.static(distDir))
+    // SPA fallback (Express 5: no '*' route patterns — plain middleware).
+    // Anything that isn't /api and wasn't a static file gets index.html so
+    // BrowserRouter deep links (/students, /finance/...) work in a browser.
+    app.use((req, res, next) => {
+        if (req.method === 'GET' && !req.path.startsWith('/api')) {
+            return res.sendFile(path.join(distDir, 'index.html'))
+        }
+        next()
+    })
+}
+
 // Global error handler — ensures every error response is JSON, not HTML
 app.use((err, req, res, next) => {
     console.error('[UNHANDLED ERROR]', err)

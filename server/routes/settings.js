@@ -30,6 +30,22 @@ router.use((req, res, next) => {
   next()
 })
 
+// ─── GET /api/settings/network — LAN addresses for multi-poste access ──
+// Feeds the top-bar "Multi-postes" panel: the hostname URL is the stable
+// printable link (Windows resolves computer names on the LAN), IPs are the
+// fallback for non-Windows clients.
+router.get('/network', (req, res) => {
+  const os = require('os')
+  const port = process.env.PORT || 3000
+  const ips = []
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs || []) {
+      if (a.family === 'IPv4' && !a.internal) ips.push(a.address)
+    }
+  }
+  return res.json({ hostname: os.hostname().toLowerCase(), port: Number(port), ips })
+})
+
 // ─── GET /api/settings — All settings ───────────────────────
 router.get('/', requirePermission('students.view'), (req, res) => {
   const db = getDb()
