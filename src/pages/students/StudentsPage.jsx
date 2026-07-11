@@ -158,6 +158,8 @@ export default function StudentsPage() {
 
       const yearSlug = (data.academic_year_label || 'annee').replace(/[^a-z0-9]/gi, '_')
       doc.save(`Resume_effectifs_${yearSlug}.pdf`)
+      // Fin d'année's gate 4 checks this timestamp — best-effort, doesn't block the download.
+      api.post('/api/students/summary/mark-downloaded').catch(() => {})
     } catch (err) {
       console.error('Summary PDF error', err)
     }

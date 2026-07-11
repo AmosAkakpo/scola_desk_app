@@ -79,6 +79,18 @@ router.get('/summary', requirePermission('students.view'), (req, res) => {
   })
 })
 
+// ─── POST /api/students/summary/mark-downloaded — Fin d'année gate 4 ─
+// Best-effort timestamp: the PDF itself is generated client-side (jsPDF),
+// so this just records that the download was triggered, right after it.
+router.post('/summary/mark-downloaded', requirePermission('students.view'), (req, res) => {
+  const db = getDb()
+  db.prepare(`
+    INSERT OR REPLACE INTO app_settings (key, value, updated_at)
+    VALUES ('effectifs_pdf_downloaded_at', datetime('now'), datetime('now'))
+  `).run()
+  return res.json({ success: true })
+})
+
 // ─── GET /api/students/:id — Full profile ───────────────────
 router.get('/:id', requirePermission('students.view'), (req, res) => {
   const db = getDb()
