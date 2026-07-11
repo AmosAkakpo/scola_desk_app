@@ -35,22 +35,14 @@ function computeChecklist(db, yearId, hasSuccessfulFullSync) {
     detail: `${bulletinsGenerated}/${totalStudentsFinal} élèves`,
   })
 
-  // Gate 3: exam results recorded for every cohort student [blocking only if mode != moyenne_only]
+  // Gate 3: exam results recorded for every cohort student [always blocking,
+  // regardless of passing mode -- entry is manual and must be verified by
+  // the admin every time, never silently skipped because a mode makes the
+  // score not count toward the verdict].
   const cohortLevels = db.prepare(
     'SELECT id, name, exam_name FROM levels WHERE is_exam_cohort = 1 AND exam_name IS NOT NULL'
   ).all()
   for (const level of cohortLevels) {
-    const rule = db.prepare('SELECT mode FROM exam_passing_rules WHERE exam_type = ?').get(level.exam_name)
-    const mode = rule?.mode || 'moyenne_only'
-    if (mode === 'moyenne_only') {
-      gates.push({
-        key: `exam_results_${level.exam_name}`,
-        label: `Résultats ${level.exam_name} (${level.name})`,
-        status: 'ok',
-        detail: 'Non requis pour ce mode',
-      })
-      continue
-    }
     const cohortStudents = db.prepare(`
       SELECT COUNT(*) as cnt FROM enrollments e
       JOIN classrooms c ON c.id = e.classroom_id AND c.level_id = ? AND c.is_deleted = 0

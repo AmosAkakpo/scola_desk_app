@@ -115,7 +115,7 @@ function Etape1Checklist({ yearId, onNext }) {
             ))}
             {gates.some(g => g.key.startsWith('exam_results_') && g.status === 'blocked') && (
               <p className="text-xs text-steel-400">
-                Configurez les critères de passage dans Paramètres → Structure académique → Examens nationaux.
+                Saisissez les résultats manquants à l'étape suivante.
               </p>
             )}
           </div>
@@ -166,16 +166,11 @@ function Etape2ExamResults({ yearId, onBack, onNext }) {
   const [activeExam, setActiveExam] = useState('')
 
   useEffect(() => {
-    Promise.all([
-      api.get('/api/promotion/exam-cohort-levels'),
-      api.get('/api/promotion/exam-rules'),
-    ]).then(([lvl, r]) => {
-      const rulesByType = {}
-      for (const rule of r.data.rules || []) rulesByType[rule.exam_type] = rule
-      const needed = (lvl.data.levels || [])
-        .filter(l => l.is_exam_cohort && rulesByType[l.exam_name]?.mode !== 'moyenne_only')
-        .map(l => l.exam_name)
-      const unique = [...new Set(needed)]
+    api.get('/api/promotion/exam-cohort-levels').then(res => {
+      // Entry is always required for every cohort level, regardless of its
+      // passing mode -- the mode only decides whether the score counts
+      // toward the verdict, never whether it needs to be recorded.
+      const unique = [...new Set((res.data.levels || []).filter(l => l.is_exam_cohort).map(l => l.exam_name))]
       setExamTypes(unique)
       setActiveExam(unique[0] || '')
       setLoading(false)
@@ -187,7 +182,7 @@ function Etape2ExamResults({ yearId, onBack, onNext }) {
   if (examTypes.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-steel-200 p-6 space-y-4">
-        <p className="text-sm text-steel-500">Aucun examen national ne nécessite de saisie (tous configurés en « moyenne de l'année seulement »).</p>
+        <p className="text-sm text-steel-500">Aucun examen national configuré (Paramètres → Structure académique → Examens nationaux).</p>
         <div className="flex gap-3">
           <button onClick={onBack} className="px-4 py-2 border border-steel-200 rounded-lg text-sm text-steel-600 hover:bg-steel-50">Retour</button>
           <button onClick={onNext} className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium">Continuer</button>
