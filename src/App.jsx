@@ -36,6 +36,7 @@ import BulletinSettingsPage from './pages/settings/BulletinSettingsPage'
 import StructureSettingsPage from './pages/settings/StructureSettingsPage'
 import SyncPage from './pages/settings/SyncPage'
 import UsersPage from './pages/settings/UsersPage'
+import FinAnneePage from './pages/general/FinAnneePage'
 import api from './utils/api'
 import './App.css'
 
@@ -141,6 +142,7 @@ function ProtectedApp({ schoolInfo }) {
           </Route>
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/users" element={<UsersPage />} />
+          <Route path="/fin-annee" element={<FinAnneePage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>

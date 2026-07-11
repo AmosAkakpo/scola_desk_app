@@ -106,6 +106,7 @@ export default function StructureSettingsPage() {
             { key: 'subjects', label: 'Matières' },
             { key: 'assessments', label: 'Évaluations' },
             { key: 'coefficients', label: 'Coefficients' },
+            { key: 'examens', label: 'Examens nationaux' },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-brand text-brand' : 'border-transparent text-steel-500 hover:text-steel-700'}`}>
@@ -222,6 +223,11 @@ export default function StructureSettingsPage() {
           {/* Subjects tab */}
           {tab === 'subjects' && (
             <SubjectsManager data={data} onUpdate={loadData} showMsg={showMsg} />
+          )}
+
+          {/* National exams tab */}
+          {tab === 'examens' && (
+            <ExamensManager data={data} onUpdate={loadData} showMsg={showMsg} />
           )}
         </div>
       </div>
@@ -563,6 +569,136 @@ function SubjectsManager({ data, onUpdate, showMsg }) {
             <p className="font-medium text-steel-800">{removeTarget.subject_name}</p>
             <p className="text-xs text-steel-500 mt-0.5">{removeTarget.level_name}</p>
           </div>
+        </ConfirmModal>
+      )}
+    </div>
+  )
+}
+
+// ─── Examens Nationaux Manager ───────────────────────────────
+// Which levels are exam cohorts (CEP/BEPC/BAC style) + the passing
+// criteria used by the Fin d'année promotion flow. Independent from the
+// `data` prop (which comes from /api/settings/academic) since this reads
+// its own dedicated endpoints.
+function ExamensManager({ onUpdate, showMsg }) {
+  const [levels, setLevels] = useState([])
+  const [rules, setRules] = useState([])
+  const [editing, setEditing] = useState(null) // level being toggled on: { id, name }
+  const [examName, setExamName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  function load() {
+    Promise.all([
+      api.get('/api/promotion/exam-cohort-levels'),
+      api.get('/api/promotion/exam-rules'),
+    ]).then(([lvl, r]) => {
+      setLevels(lvl.data.levels || [])
+      setRules(r.data.rules || [])
+    })
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function toggleCohort(level) {
+    if (level.is_exam_cohort) {
+      await api.put(`/api/promotion/exam-cohort-levels/${level.id}`, { is_exam_cohort: false, exam_name: null })
+      showMsg('Examen retiré')
+      load()
+      onUpdate?.()
+    } else {
+      setEditing(level)
+      setExamName('')
+    }
+  }
+
+  async function confirmEnableCohort() {
+    if (!examName.trim()) return
+    setSaving(true)
+    await api.put(`/api/promotion/exam-cohort-levels/${editing.id}`, { is_exam_cohort: true, exam_name: examName.trim() })
+    setSaving(false)
+    setEditing(null)
+    showMsg('Examen configuré')
+    load()
+    onUpdate?.()
+  }
+
+  async function updateRule(examType, field, value) {
+    const rule = rules.find(r => r.exam_type === examType) || { mode: 'moyenne_only', min_moyenne: 10 }
+    const updated = { ...rule, [field]: value }
+    setRules(prev => prev.map(r => r.exam_type === examType ? updated : r))
+    await api.put(`/api/promotion/exam-rules/${examType}`, { mode: updated.mode, min_moyenne: parseFloat(updated.min_moyenne) })
+  }
+
+  const cohortLevels = levels.filter(l => l.is_exam_cohort)
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-xs text-steel-500 mb-3">
+          Désignez quels niveaux se terminent par un examen national (CEP, BEPC, BAC...). Utilisé par la promotion de fin d'année.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {levels.map(l => (
+            <button key={l.id} onClick={() => toggleCohort(l)}
+              className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${l.is_exam_cohort ? 'border-brand bg-brand-50 text-brand-600' : 'border-steel-200 text-steel-400'}`}>
+              {l.name}{l.is_exam_cohort && ` — ${l.exam_name}`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {cohortLevels.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-steel-700 mb-2">Critères de passage</p>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-steel-200">
+                <th className="text-left py-2 text-steel-500 font-medium">Examen</th>
+                <th className="text-left py-2 text-steel-500 font-medium">Mode</th>
+                <th className="text-center py-2 text-steel-500 font-medium">Moyenne minimale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cohortLevels.map(l => {
+                const rule = rules.find(r => r.exam_type === l.exam_name) || { mode: 'moyenne_only', min_moyenne: 10 }
+                return (
+                  <tr key={l.id} className="border-b border-steel-50">
+                    <td className="py-2 text-steel-700 font-medium">{l.exam_name} ({l.name})</td>
+                    <td className="py-2">
+                      <select value={rule.mode} onChange={e => updateRule(l.exam_name, 'mode', e.target.value)}
+                        className="px-2 py-1 border border-steel-200 rounded text-xs bg-white focus:outline-none focus:border-brand">
+                        <option value="moyenne_only">Moyenne de l'année seulement</option>
+                        <option value="exam_only">Examen national seulement</option>
+                        <option value="both">Moyenne ET examen national</option>
+                      </select>
+                    </td>
+                    <td className="py-2 text-center">
+                      <input type="number" step="0.5" min="0" max="20" value={rule.min_moyenne}
+                        onChange={e => updateRule(l.exam_name, 'min_moyenne', e.target.value)}
+                        className="w-16 px-1 py-1 border border-steel-200 rounded text-xs text-center focus:outline-none focus:border-brand" />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <p className="text-xs text-steel-400 mt-2">Les changements sont enregistrés immédiatement.</p>
+        </div>
+      )}
+
+      {editing && (
+        <ConfirmModal
+          title="Configurer l'examen"
+          message={`Nom de l'examen pour ${editing.name} (ex: CEP, BEPC, BAC).`}
+          confirmLabel="Confirmer"
+          saving={saving}
+          savingLabel="Enregistrement..."
+          onCancel={() => setEditing(null)}
+          onConfirm={confirmEnableCohort}
+        >
+          <input type="text" value={examName} onChange={e => setExamName(e.target.value)} autoFocus
+            placeholder="Ex: BEPC" maxLength={20}
+            className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand" />
         </ConfirmModal>
       )}
     </div>
