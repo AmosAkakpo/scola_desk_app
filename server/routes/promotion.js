@@ -3,7 +3,10 @@ const router = express.Router()
 const { getDb } = require('../db/init')
 const { requireAuth } = require('../middleware/requireAuth')
 const { hasSuccessfulFullSync } = require('./sync')
-const { resolveTarget } = require('../utils/promotionMapping')
+const { computeChecklist } = require('../utils/promotionChecklist')
+const { computeVerdicts } = require('../utils/promotionVerdicts')
+const { autoAssignMandatoryFees } = require('../utils/fees')
+const { generateUUID } = require('../utils/uid')
 
 router.use(requireAuth)
 
@@ -156,96 +159,8 @@ router.post('/exam-results', (req, res) => {
 // ─── GET /api/promotion/checklist/:academicYearId — Étape 1 gates ─────────
 router.get('/checklist/:academicYearId', (req, res) => {
   const db = getDb()
-  const yearId = req.params.academicYearId
-  const periodeCount = parseInt(db.prepare("SELECT value FROM app_settings WHERE key = 'periode_count'").get()?.value || '3')
-  const finalSemester = periodeCount
-
-  const gates = []
-
-  // Gate 1: final-period grades computed for every classroom [blocking]
-  const totalClassrooms = db.prepare(
-    'SELECT COUNT(*) as cnt FROM classrooms WHERE academic_year_id = ? AND is_deleted = 0'
-  ).get(yearId)?.cnt || 0
-  const computedClassrooms = db.prepare(
-    'SELECT COUNT(DISTINCT classroom_id) as cnt FROM semester_summaries WHERE academic_year_id = ? AND semester = ?'
-  ).get(yearId, finalSemester)?.cnt || 0
-  gates.push({
-    key: 'grades_computed',
-    label: 'Notes de la période finale calculées pour toutes les classes',
-    status: totalClassrooms > 0 && computedClassrooms >= totalClassrooms ? 'ok' : 'blocked',
-    detail: `${computedClassrooms}/${totalClassrooms} classes`,
-  })
-
-  // Gate 2: bulletins générés [advisory only]
-  const totalStudentsFinal = db.prepare(
-    'SELECT COUNT(*) as cnt FROM enrollments WHERE academic_year_id = ? AND is_deleted = 0 AND is_expelled = 0'
-  ).get(yearId)?.cnt || 0
-  const bulletinsGenerated = db.prepare(
-    'SELECT COUNT(*) as cnt FROM report_card_snapshots WHERE academic_year_id = ? AND semester = ?'
-  ).get(yearId, finalSemester)?.cnt || 0
-  gates.push({
-    key: 'bulletins_generated',
-    label: 'Bulletins générés',
-    status: totalStudentsFinal > 0 && bulletinsGenerated >= totalStudentsFinal ? 'ok' : 'warning',
-    detail: `${bulletinsGenerated}/${totalStudentsFinal} élèves`,
-  })
-
-  // Gate 3: exam results recorded for every cohort student [blocking only if mode != moyenne_only]
-  const cohortLevels = db.prepare(
-    'SELECT id, name, exam_name FROM levels WHERE is_exam_cohort = 1 AND exam_name IS NOT NULL'
-  ).all()
-  for (const level of cohortLevels) {
-    const rule = db.prepare('SELECT mode FROM exam_passing_rules WHERE exam_type = ?').get(level.exam_name)
-    const mode = rule?.mode || 'moyenne_only'
-    if (mode === 'moyenne_only') {
-      gates.push({
-        key: `exam_results_${level.exam_name}`,
-        label: `Résultats ${level.exam_name} (${level.name})`,
-        status: 'ok',
-        detail: 'Non requis pour ce mode',
-      })
-      continue
-    }
-    const cohortStudents = db.prepare(`
-      SELECT COUNT(*) as cnt FROM enrollments e
-      JOIN classrooms c ON c.id = e.classroom_id AND c.level_id = ? AND c.is_deleted = 0
-      WHERE e.academic_year_id = ? AND e.is_deleted = 0 AND e.is_expelled = 0
-    `).get(level.id, yearId)?.cnt || 0
-    const recorded = db.prepare(`
-      SELECT COUNT(*) as cnt FROM national_exam_results ner
-      JOIN enrollments e ON e.student_id = ner.student_id AND e.academic_year_id = ner.academic_year_id
-      JOIN classrooms c ON c.id = e.classroom_id AND c.level_id = ?
-      WHERE ner.academic_year_id = ? AND ner.exam_type = ? AND ner.result IS NOT NULL AND e.is_deleted = 0 AND e.is_expelled = 0
-    `).get(level.id, yearId, level.exam_name)?.cnt || 0
-    gates.push({
-      key: `exam_results_${level.exam_name}`,
-      label: `Résultats ${level.exam_name} (${level.name})`,
-      status: cohortStudents > 0 && recorded >= cohortStudents ? 'ok' : 'blocked',
-      detail: `${recorded}/${cohortStudents} élèves`,
-    })
-  }
-
-  // Gate 4: effectifs PDF downloaded today [blocking]
-  const downloadedAt = db.prepare("SELECT value FROM app_settings WHERE key = 'effectifs_pdf_downloaded_at'").get()?.value
-  const downloadedToday = downloadedAt && (Date.now() - new Date(downloadedAt).getTime()) < 24 * 60 * 60 * 1000
-  gates.push({
-    key: 'effectifs_pdf',
-    label: "Résumé des effectifs téléchargé aujourd'hui",
-    status: downloadedToday ? 'ok' : 'blocked',
-    detail: downloadedAt ? `Dernier téléchargement : ${downloadedAt}` : 'Jamais téléchargé',
-  })
-
-  // Gate 5: successful sync from today [blocking]
-  const syncedToday = hasSuccessfulFullSync(db, 1)
-  gates.push({
-    key: 'sync',
-    label: "Synchronisation réussie aujourd'hui",
-    status: syncedToday ? 'ok' : 'blocked',
-    detail: syncedToday ? 'À jour' : 'Aucune synchronisation réussie aujourd\'hui',
-  })
-
-  const canProceed = gates.every(g => g.status !== 'blocked')
-  return res.json({ gates, can_proceed: canProceed })
+  const result = computeChecklist(db, req.params.academicYearId, hasSuccessfulFullSync)
+  return res.json(result)
 })
 
 // ─── POST /api/promotion/preview/:academicYearId — Étape 3 verdicts ───────
@@ -253,123 +168,202 @@ router.get('/checklist/:academicYearId', (req, res) => {
 // Pure read -- computes but persists nothing.
 router.post('/preview/:academicYearId', (req, res) => {
   const db = getDb()
-  const yearId = req.params.academicYearId
   const overrides = req.body?.overrides || [] // [{ student_id, verdict, reason }]
   const overrideMap = new Map(overrides.map(o => [o.student_id, o]))
 
+  const { rows, summary } = computeVerdicts(db, req.params.academicYearId, overrideMap)
+
+  // Preview only needs display fields, not the raw target object execute uses.
+  const displayRows = rows.map(r => ({
+    student_id: r.student_id,
+    full_name: r.full_name,
+    matricule: r.matricule,
+    source_classroom: r.source_classroom,
+    source_level: r.source_level,
+    annual_average: r.annual_average,
+    threshold: r.threshold,
+    exam_result: r.exam_result,
+    borderline: r.borderline,
+    verdict: r.verdict,
+    graduated: r.graduated,
+    override_reason: r.override_reason,
+    target_level: r.graduated ? null : r.target?.level_name || null,
+    target_classroom: r.graduated ? null : r.target?.label || null,
+    target_is_new_level: r.target?.is_new_level || false,
+  }))
+
+  return res.json({ rows: displayRows, summary })
+})
+
+// ─── POST /api/promotion/execute/:academicYearId — Étape 4 ────────────────
+router.post('/execute/:academicYearId', (req, res) => {
+  const db = getDb()
+  const oldYearId = parseInt(req.params.academicYearId)
+  const { overrides, carry_forward_assignments, new_year_label, confirm_text } = req.body || {}
+
+  if (confirm_text !== 'PROMOTION') {
+    return res.status(400).json({ error: 'CONFIRM_REQUIRED', message: 'Confirmation requise' })
+  }
+  if (!new_year_label?.trim()) {
+    return res.status(400).json({ error: 'MISSING_LABEL', message: "Libellé de l'année requise" })
+  }
+  if (db.prepare('SELECT id FROM academic_years WHERE label = ?').get(new_year_label.trim())) {
+    return res.status(409).json({ error: 'DUPLICATE_LABEL', message: 'Cette année académique existe déjà' })
+  }
+
+  // Never trust a stale client-side checklist -- re-validate every gate here.
+  const checklist = computeChecklist(db, oldYearId, hasSuccessfulFullSync)
+  if (!checklist.can_proceed) {
+    return res.status(400).json({ error: 'GATES_NOT_MET', message: 'Toutes les conditions ne sont pas remplies', gates: checklist.gates })
+  }
+
+  const overrideMap = new Map((overrides || []).map(o => [o.student_id, o]))
+  const { rows: verdictRows } = computeVerdicts(db, oldYearId, overrideMap)
+
   const periodeCount = parseInt(db.prepare("SELECT value FROM app_settings WHERE key = 'periode_count'").get()?.value || '3')
-  const passageCutoff = parseFloat(db.prepare("SELECT value FROM app_settings WHERE key = 'passage_cutoff'").get()?.value || '10')
 
-  const rulesByExam = {}
-  for (const r of db.prepare('SELECT exam_type, mode, min_moyenne FROM exam_passing_rules').all()) {
-    rulesByExam[r.exam_type] = r
+  try {
+    const promotionUid = db.transaction(() => {
+      // 1. New academic year, becomes the active one.
+      const yearResult = db.prepare(
+        'INSERT INTO academic_years (label, is_active) VALUES (?, 1)'
+      ).run(new_year_label.trim())
+      const newYearId = yearResult.lastInsertRowid
+
+      db.prepare('UPDATE academic_years SET is_active = 0 WHERE id != ?').run(newYearId)
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('current_academic_year_id', ?, datetime('now'))")
+        .run(String(newYearId))
+
+      // 2. Copy fee_types + fee_type_amounts into the new year (system fee included).
+      const oldFeeTypes = db.prepare('SELECT * FROM fee_types WHERE academic_year_id = ?').all(oldYearId)
+      const feeTypeIdMap = new Map() // old fee_type_id -> new fee_type_id
+      for (const ft of oldFeeTypes) {
+        const r = db.prepare(`
+          INSERT INTO fee_types (academic_year_id, name, is_mandatory, is_system, is_active, display_order)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(newYearId, ft.name, ft.is_mandatory, ft.is_system, ft.is_active, ft.display_order)
+        feeTypeIdMap.set(ft.id, r.lastInsertRowid)
+
+        const amounts = db.prepare('SELECT * FROM fee_type_amounts WHERE fee_type_id = ?').all(ft.id)
+        const amtStmt = db.prepare('INSERT INTO fee_type_amounts (fee_type_id, level_id, amount) VALUES (?, ?, ?)')
+        for (const a of amounts) amtStmt.run(r.lastInsertRowid, a.level_id, a.amount)
+      }
+
+      // 3. Create target classrooms on demand + their assessment templates.
+      const classroomCache = new Map() // "level|serie|label" -> new classroom_id
+      const activatedLevels = new Set()
+      const sourceToTargetClassroom = new Map() // sourceClassroomId -> newClassroomId (for teacher_schedule/timetable carry-forward)
+
+      function getOrCreateTargetClassroom(target, sourceClassroomId, sourceClassroomRow) {
+        const cacheKey = `${target.level_id}|${target.serie_id || 'null'}|${target.label}`
+        let classroomId = classroomCache.get(cacheKey)
+        if (!classroomId) {
+          const uid = generateUUID()
+          const r = db.prepare(`
+            INSERT INTO classrooms (classroom_uid, label, level_id, serie_id, academic_year_id, capacity, expected_tuition)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(uid, target.label, target.level_id, target.serie_id || null, newYearId, sourceClassroomRow.capacity || 50, sourceClassroomRow.expected_tuition || 0)
+          classroomId = r.lastInsertRowid
+          classroomCache.set(cacheKey, classroomId)
+
+          if (target.is_new_level && !activatedLevels.has(target.level_id)) {
+            db.prepare('UPDATE levels SET is_active = 1 WHERE id = ?').run(target.level_id)
+            activatedLevels.add(target.level_id)
+          }
+
+          // Assessment templates, mirroring classrooms.js's own creation logic.
+          const configRow = db.prepare("SELECT value FROM app_settings WHERE key = ?").get(`assessment_config_${target.level_id}`)
+          const cfg = configRow ? JSON.parse(configRow.value) : { interrogations: 4, devoirs: 1, compositions: 1, max_score: 20 }
+          const subjects = target.serie_id
+            ? db.prepare('SELECT subject_id FROM level_subjects WHERE level_id = ? AND is_active = 1 AND (serie_id = ? OR serie_id IS NULL)').all(target.level_id, target.serie_id)
+            : db.prepare('SELECT subject_id FROM level_subjects WHERE level_id = ? AND is_active = 1 AND serie_id IS NULL').all(target.level_id)
+          const tpl = db.prepare(`
+            INSERT OR IGNORE INTO assessment_templates (classroom_id, subject_id, academic_year_id, semester, assessment_type, sequence_number, max_score, weight)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `)
+          for (const sub of subjects) {
+            for (let sem = 1; sem <= periodeCount; sem++) {
+              for (let i = 1; i <= cfg.interrogations; i++) tpl.run(classroomId, sub.subject_id, newYearId, sem, 'interrogation', i, cfg.max_score, 1)
+              for (let i = 1; i <= cfg.devoirs; i++) tpl.run(classroomId, sub.subject_id, newYearId, sem, 'devoir', i, cfg.max_score, 1)
+              for (let i = 1; i <= cfg.compositions; i++) tpl.run(classroomId, sub.subject_id, newYearId, sem, 'composition', i, cfg.max_score, 1)
+            }
+          }
+        }
+        if (sourceClassroomId) sourceToTargetClassroom.set(`${sourceClassroomId}|${classroomId}`, classroomId)
+        return classroomId
+      }
+
+      // 4. Apply each verdict.
+      const promotionRunResult = db.prepare(`
+        INSERT INTO promotion_runs (promotion_uid, academic_year_from, academic_year_to, executed_by, notes)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(generateUUID(), oldYearId, newYearId, req.user.id, null)
+      const promotionRunId = promotionRunResult.lastInsertRowid
+
+      const detailStmt = db.prepare(`
+        INSERT INTO promotion_details
+          (promotion_run_id, student_id, old_classroom_id, new_classroom_id, final_average, verdict, national_exam_cleared, override_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      const sourceClassroomRows = new Map()
+      for (const row of verdictRows) {
+        if (!sourceClassroomRows.has(row.source_classroom_id)) {
+          sourceClassroomRows.set(row.source_classroom_id, db.prepare('SELECT * FROM classrooms WHERE id = ?').get(row.source_classroom_id))
+        }
+        const sourceClassroomRow = sourceClassroomRows.get(row.source_classroom_id)
+
+        let newClassroomId = null
+
+        if (row.verdict === 'exclu') {
+          db.prepare("UPDATE students SET status = 'excluded', updated_at = datetime('now') WHERE id = ?").run(row.student_id)
+        } else if (row.graduated) {
+          db.prepare("UPDATE students SET status = 'graduated', updated_at = datetime('now') WHERE id = ?").run(row.student_id)
+        } else if (row.target) {
+          newClassroomId = getOrCreateTargetClassroom(row.target, row.source_classroom_id, sourceClassroomRow)
+          db.prepare('INSERT INTO enrollments (enrollment_uid, student_id, classroom_id, academic_year_id) VALUES (?, ?, ?, ?)')
+            .run(generateUUID(), row.student_id, newClassroomId, newYearId)
+          db.prepare('UPDATE students SET is_redoublant = ?, updated_at = datetime(\'now\') WHERE id = ?')
+            .run(row.verdict === 'doublant' ? 1 : 0, row.student_id)
+          autoAssignMandatoryFees(db, row.student_id, newYearId)
+        }
+
+        detailStmt.run(
+          promotionRunId, row.student_id, row.source_classroom_id, newClassroomId,
+          row.annual_average, row.graduated ? 'admis' : row.verdict,
+          row.exam_result === 'admis' ? 1 : 0, row.override_reason
+        )
+      }
+
+      // 5. Optionally carry forward teacher assignments + timetable.
+      if (carry_forward_assignments) {
+        const pairs = Array.from(sourceToTargetClassroom.keys())
+        const scheduleStmt = db.prepare(`
+          INSERT OR IGNORE INTO teacher_schedule (teacher_id, classroom_id, subject_id, academic_year_id, hours_per_week, hourly_rate)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `)
+        const timetableStmt = db.prepare(`
+          INSERT INTO timetable_entries (academic_year_id, classroom_id, day_of_week, start_time, end_time, subject_id, teacher_id, room)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        for (const pairKey of pairs) {
+          const [sourceClassroomId, newClassroomId] = pairKey.split('|').map(Number)
+          const schedules = db.prepare('SELECT * FROM teacher_schedule WHERE classroom_id = ? AND academic_year_id = ?').all(sourceClassroomId, oldYearId)
+          for (const sch of schedules) scheduleStmt.run(sch.teacher_id, newClassroomId, sch.subject_id, newYearId, sch.hours_per_week, sch.hourly_rate)
+
+          const entries = db.prepare('SELECT * FROM timetable_entries WHERE classroom_id = ? AND academic_year_id = ?').all(sourceClassroomId, oldYearId)
+          for (const e of entries) timetableStmt.run(newYearId, newClassroomId, e.day_of_week, e.start_time, e.end_time, e.subject_id, e.teacher_id, e.room)
+        }
+      }
+
+      return db.prepare('SELECT promotion_uid FROM promotion_runs WHERE id = ?').get(promotionRunId).promotion_uid
+    })()
+
+    return res.json({ success: true, promotion_uid: promotionUid })
+  } catch (err) {
+    console.error('[PROMOTION EXECUTE]', err)
+    return res.status(500).json({ error: 'EXECUTE_FAILED', message: 'Erreur lors de la promotion' })
   }
-
-  const classrooms = db.prepare(`
-    SELECT c.*, l.name AS level_name, l.is_exam_cohort, l.exam_name, l.display_order, l.has_serie
-    FROM classrooms c
-    JOIN levels l ON l.id = c.level_id
-    WHERE c.academic_year_id = ? AND c.is_deleted = 0
-  `).all(yearId)
-
-  const rows = []
-  let excludedCount = 0
-  const counts = { admis: 0, doublant: 0, graduated: 0, exclu: 0 }
-
-  for (const classroom of classrooms) {
-    const active = db.prepare(`
-      SELECT s.id, s.full_name, s.matricule
-      FROM students s
-      JOIN enrollments e ON e.student_id = s.id AND e.classroom_id = ? AND e.academic_year_id = ?
-        AND e.is_deleted = 0 AND e.is_expelled = 0
-      WHERE s.is_deleted = 0
-      ORDER BY s.full_name
-    `).all(classroom.id, yearId)
-
-    const excluded = db.prepare(`
-      SELECT COUNT(*) as cnt FROM enrollments e
-      WHERE e.classroom_id = ? AND e.academic_year_id = ? AND e.is_deleted = 0 AND e.is_expelled = 1
-    `).get(classroom.id, yearId)?.cnt || 0
-    excludedCount += excluded
-
-    for (const student of active) {
-      // Annual average = mean of every recorded semester_average, same
-      // formula as the report card's annual_average (reportcards.js).
-      const semAvgs = []
-      for (let s = 1; s <= periodeCount; s++) {
-        const ss = db.prepare(`
-          SELECT semester_average FROM semester_summaries
-          WHERE student_id = ? AND classroom_id = ? AND academic_year_id = ? AND semester = ?
-        `).get(student.id, classroom.id, yearId, s)
-        if (ss?.semester_average != null) semAvgs.push(ss.semester_average)
-      }
-      const annualAvg = semAvgs.length > 0
-        ? parseFloat((semAvgs.reduce((a, b) => a + b, 0) / semAvgs.length).toFixed(2))
-        : null
-
-      let threshold = passageCutoff
-      let admis = annualAvg !== null ? annualAvg >= threshold : false
-      let examResult = null
-
-      if (classroom.is_exam_cohort && classroom.exam_name) {
-        const rule = rulesByExam[classroom.exam_name] || { mode: 'moyenne_only', min_moyenne: 10 }
-        threshold = rule.min_moyenne
-        examResult = db.prepare(`
-          SELECT result, score FROM national_exam_results
-          WHERE student_id = ? AND academic_year_id = ? AND exam_type = ?
-        `).get(student.id, yearId, classroom.exam_name)
-
-        const moyenneOk = annualAvg !== null && annualAvg >= threshold
-        const examOk = examResult?.result === 'admis'
-        if (rule.mode === 'moyenne_only') admis = moyenneOk
-        else if (rule.mode === 'exam_only') admis = examOk
-        else admis = moyenneOk && examOk
-      }
-
-      const borderline = annualAvg !== null && Math.abs(annualAvg - threshold) <= 0.5
-
-      let verdict = admis ? 'admis' : 'doublant'
-      let overrideReason = null
-      const override = overrideMap.get(student.id)
-      if (override) { verdict = override.verdict; overrideReason = override.reason || null }
-
-      let target = null
-      let graduated = false
-      if (verdict === 'admis' || verdict === 'doublant') {
-        target = resolveTarget(db, classroom, {
-          id: classroom.level_id, name: classroom.level_name, has_serie: classroom.has_serie, display_order: classroom.display_order,
-        }, verdict, yearId)
-        if (!target && verdict === 'admis') graduated = true
-      }
-
-      if (graduated) counts.graduated++
-      else if (verdict === 'exclu') counts.exclu++
-      else counts[verdict] = (counts[verdict] || 0) + 1
-
-      rows.push({
-        student_id: student.id,
-        full_name: student.full_name,
-        matricule: student.matricule,
-        source_classroom: classroom.label,
-        source_level: classroom.level_name,
-        annual_average: annualAvg,
-        threshold,
-        exam_result: examResult?.result || null,
-        borderline,
-        verdict,
-        graduated,
-        override_reason: overrideReason,
-        target_level: graduated ? null : target?.level_name || null,
-        target_classroom: graduated ? null : target?.label || null,
-        target_is_new_level: target?.is_new_level || false,
-      })
-    }
-  }
-
-  return res.json({
-    rows,
-    summary: { ...counts, excluded_from_calc: excludedCount },
-  })
 })
 
 module.exports = router
