@@ -20,13 +20,24 @@ router.use((req, res, next) => {
 })
 
 // ─── GET /api/promotion/exam-cohort-levels — levels + their exam config ───
+// cohort_student_count is for the CURRENT year -- lets the frontend hide an
+// exam tab entirely when the school has configured a cohort level (e.g.
+// CEP) but has zero students actually enrolled in it this year.
 router.get('/exam-cohort-levels', (req, res) => {
   const db = getDb()
+  const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
   const levels = db.prepare(`
     SELECT id, name, level_code, has_serie, is_exam_cohort, exam_name, display_order
     FROM levels
     ORDER BY display_order
   `).all()
+  for (const level of levels) {
+    level.cohort_student_count = db.prepare(`
+      SELECT COUNT(*) as cnt FROM enrollments e
+      JOIN classrooms c ON c.id = e.classroom_id AND c.level_id = ? AND c.is_deleted = 0
+      WHERE e.academic_year_id = ? AND e.is_deleted = 0 AND e.is_expelled = 0
+    `).get(level.id, yearId || 0)?.cnt || 0
+  }
   return res.json({ levels })
 })
 
@@ -211,11 +222,9 @@ router.post('/execute/:academicYearId', (req, res) => {
     return res.status(409).json({ error: 'DUPLICATE_LABEL', message: 'Cette année académique existe déjà' })
   }
 
-  // Never trust a stale client-side checklist -- re-validate every gate here.
-  const checklist = computeChecklist(db, oldYearId, hasSuccessfulFullSync)
-  if (!checklist.can_proceed) {
-    return res.status(400).json({ error: 'GATES_NOT_MET', message: 'Toutes les conditions ne sont pas remplies', gates: checklist.gates })
-  }
+  // Étape 1's checklist is a fully manual, self-declared confirmation by the
+  // admin (owner request 2026-07-11: nothing about it is auto-detected or
+  // auto-blocking) -- execute does not re-derive or enforce it server-side.
 
   const overrideMap = new Map((overrides || []).map(o => [o.student_id, o]))
   const { rows: verdictRows } = computeVerdicts(db, oldYearId, overrideMap)

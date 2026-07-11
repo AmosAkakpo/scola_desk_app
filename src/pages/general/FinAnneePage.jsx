@@ -12,13 +12,6 @@ function suggestNextLabel(label) {
   if (!m) return ''
   return `${parseInt(m[1]) + 1}-${parseInt(m[2]) + 1}`
 }
-const STATUS_STYLES = {
-  ok: 'border-green-200 bg-green-50 text-green-700',
-  warning: 'border-amber-200 bg-amber-50 text-amber-700',
-  blocked: 'border-red-200 bg-red-50 text-red-700',
-}
-const STATUS_ICON = { ok: '✓', warning: '!', blocked: '✕' }
-
 export default function FinAnneePage() {
   const [step, setStep] = useState(1)
   const [yearId, setYearId] = useState(null)
@@ -53,7 +46,7 @@ export default function FinAnneePage() {
         ))}
       </div>
 
-      {step === 1 && <Etape1Checklist yearId={yearId} onNext={() => setStep(2)} />}
+      {step === 1 && <Etape1Checklist onNext={() => setStep(2)} />}
       {step === 2 && <Etape2ExamResults yearId={yearId} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
       {step === 3 && (
         <Etape3Preview yearId={yearId}
@@ -72,76 +65,48 @@ export default function FinAnneePage() {
   )
 }
 
-// ─── Étape 1 — Checklist ──────────────────────────────────────
-function Etape1Checklist({ yearId, onNext }) {
-  const [gates, setGates] = useState([])
-  const [canProceed, setCanProceed] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [toggles, setToggles] = useState({ notes: false, bulletins: false, salaires: false })
+// ─── Étape 1 — Checklist (fully manual — nothing here is computed from the
+// database; the admin personally checks each item, every time, no
+// auto-detection or auto-blocking).
+const CHECKLIST_ITEMS = [
+  { key: 'grades', label: 'Les notes de la période finale sont saisies pour toutes les classes' },
+  { key: 'bulletins', label: 'Les bulletins ont été générés' },
+  { key: 'exams', label: "Les résultats des examens nationaux ont été saisis (s'il y en a)" },
+  { key: 'effectifs', label: "Le résumé des effectifs a été téléchargé et envoyé à ScolaDesk" },
+  { key: 'sync', label: "La synchronisation a été effectuée aujourd'hui" },
+  { key: 'notes_verified', label: 'Les notes ont été vérifiées par les élèves/parents' },
+  { key: 'bulletins_remis', label: 'Les bulletins ont été remis' },
+  { key: 'salaires', label: 'Tous les salaires du personnel ont été payés' },
+]
+
+function Etape1Checklist({ onNext }) {
+  const [toggles, setToggles] = useState({})
   const [showConfirm, setShowConfirm] = useState(false)
 
-  const load = useCallback(() => {
-    setLoading(true)
-    api.get(`/api/promotion/checklist/${yearId}`).then(res => {
-      setGates(res.data.gates || [])
-      setCanProceed(res.data.can_proceed)
-      setLoading(false)
-    })
-  }, [yearId])
+  // Reset every time this step opens -- a stale checklist from last year
+  // must not silently carry forward.
+  useEffect(() => { setToggles({}) }, [])
 
-  // Manual toggles are self-declared and reset every time this step opens —
-  // a stale "salaires payés" checked last year must not silently carry over.
-  useEffect(() => { load(); setToggles({ notes: false, bulletins: false, salaires: false }) }, [load])
-
-  const allToggled = toggles.notes && toggles.bulletins && toggles.salaires
-  const ready = canProceed && allToggled
+  const allChecked = CHECKLIST_ITEMS.every(item => toggles[item.key])
 
   return (
     <div className="bg-white rounded-xl border border-steel-200 p-6 space-y-6">
       <div>
-        <h2 className="text-sm font-semibold text-steel-800 mb-3">Vérifications automatiques</h2>
-        {loading ? (
-          <p className="text-sm text-steel-400">Chargement...</p>
-        ) : (
-          <div className="space-y-2">
-            {gates.map(g => (
-              <div key={g.key} className={`flex items-center justify-between px-4 py-2.5 rounded-lg border text-sm ${STATUS_STYLES[g.status]}`}>
-                <span className="flex items-center gap-2">
-                  <span className="font-bold">{STATUS_ICON[g.status]}</span>
-                  {g.label}
-                </span>
-                <span className="text-xs">{g.detail}</span>
-              </div>
-            ))}
-            {gates.some(g => g.key.startsWith('exam_results_') && g.status === 'blocked') && (
-              <p className="text-xs text-steel-400">
-                Saisissez les résultats manquants à l'étape suivante.
-              </p>
-            )}
-          </div>
-        )}
-        <button onClick={load} className="mt-2 text-xs text-brand hover:underline">Actualiser</button>
-      </div>
-
-      <div>
-        <h2 className="text-sm font-semibold text-steel-800 mb-3">Confirmations (non vérifiées automatiquement)</h2>
+        <h2 className="text-sm font-semibold text-steel-800 mb-1">Vérifications</h2>
+        <p className="text-xs text-steel-500 mb-3">Cochez vous-même chaque point après vérification — rien n'est vérifié automatiquement.</p>
         <div className="space-y-2">
-          {[
-            { key: 'notes', label: 'Les notes ont été vérifiées par les élèves/parents' },
-            { key: 'bulletins', label: 'Les bulletins ont été remis' },
-            { key: 'salaires', label: 'Tous les salaires du personnel ont été payés' },
-          ].map(t => (
-            <label key={t.key} className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-steel-200 text-sm text-steel-700 cursor-pointer hover:bg-steel-50">
-              <input type="checkbox" checked={toggles[t.key]}
-                onChange={e => setToggles(prev => ({ ...prev, [t.key]: e.target.checked }))}
+          {CHECKLIST_ITEMS.map(item => (
+            <label key={item.key} className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-steel-200 text-sm text-steel-700 cursor-pointer hover:bg-steel-50">
+              <input type="checkbox" checked={!!toggles[item.key]}
+                onChange={e => setToggles(prev => ({ ...prev, [item.key]: e.target.checked }))}
                 className="w-4 h-4 accent-brand" />
-              {t.label}
+              {item.label}
             </label>
           ))}
         </div>
       </div>
 
-      <button onClick={() => setShowConfirm(true)} disabled={!ready}
+      <button onClick={() => setShowConfirm(true)} disabled={!allChecked}
         className="w-full py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium">
         Commencer la promotion
       </button>
@@ -169,8 +134,15 @@ function Etape2ExamResults({ yearId, onBack, onNext }) {
     api.get('/api/promotion/exam-cohort-levels').then(res => {
       // Entry is always required for every cohort level, regardless of its
       // passing mode -- the mode only decides whether the score counts
-      // toward the verdict, never whether it needs to be recorded.
-      const unique = [...new Set((res.data.levels || []).filter(l => l.is_exam_cohort).map(l => l.exam_name))]
+      // toward the verdict, never whether it needs to be recorded. A level
+      // configured as a cohort but with zero students enrolled this year
+      // (e.g. CEP at a school with no primaire section) is left out — there
+      // is nothing to grade.
+      const unique = [...new Set(
+        (res.data.levels || [])
+          .filter(l => l.is_exam_cohort && l.cohort_student_count > 0)
+          .map(l => l.exam_name)
+      )]
       setExamTypes(unique)
       setActiveExam(unique[0] || '')
       setLoading(false)
@@ -182,7 +154,7 @@ function Etape2ExamResults({ yearId, onBack, onNext }) {
   if (examTypes.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-steel-200 p-6 space-y-4">
-        <p className="text-sm text-steel-500">Aucun examen national configuré (Paramètres → Structure académique → Examens nationaux).</p>
+        <p className="text-sm text-steel-500">Aucun examen national à saisir cette année (aucun élève dans un niveau configuré comme examen national, ou aucun niveau configuré — Paramètres → Structure académique → Examens nationaux).</p>
         <div className="flex gap-3">
           <button onClick={onBack} className="px-4 py-2 border border-steel-200 rounded-lg text-sm text-steel-600 hover:bg-steel-50">Retour</button>
           <button onClick={onNext} className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium">Continuer</button>
