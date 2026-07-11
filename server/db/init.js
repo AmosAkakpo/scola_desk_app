@@ -32,8 +32,17 @@ function initializeDatabase() {
 
     db = new Database(dbPath)
 
+    // WAL: readers never block writers and vice versa -- the multi-poste
+    // scenario (admin editing a student while an accountant reads their
+    // payments) is exactly what this mode is for; each side sees a
+    // consistent snapshot, never a crash or half-written row.
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
+    // Writer-vs-writer collisions (two people saving at the same instant)
+    // wait up to this long before erroring, instead of failing immediately.
+    // Was relying on better-sqlite3's undocumented-in-code 5s default;
+    // making it explicit now that multi-poste means more concurrent writers.
+    db.pragma('busy_timeout = 5000')
 
     runMigrations()
 
