@@ -366,4 +366,102 @@ router.post('/execute/:academicYearId', (req, res) => {
   }
 })
 
+// ─── GET /api/promotion/runs — history, most recent first ─────────────────
+router.get('/runs', (req, res) => {
+  const db = getDb()
+  const runs = db.prepare(`
+    SELECT
+      pr.promotion_uid, pr.executed_at, pr.is_rolled_back, pr.rolled_back_at,
+      yf.label AS year_from_label, yt.label AS year_to_label,
+      u.full_name AS executed_by_name,
+      (SELECT COUNT(*) FROM promotion_details WHERE promotion_run_id = pr.id) AS student_count
+    FROM promotion_runs pr
+    JOIN academic_years yf ON yf.id = pr.academic_year_from
+    JOIN academic_years yt ON yt.id = pr.academic_year_to
+    LEFT JOIN users u ON u.id = pr.executed_by
+    ORDER BY pr.executed_at DESC
+  `).all()
+  return res.json({ runs })
+})
+
+// ─── POST /api/promotion/rollback/:promotionUid — Étape 5, 30-day window ──
+router.post('/rollback/:promotionUid', (req, res) => {
+  const db = getDb()
+  const run = db.prepare('SELECT * FROM promotion_runs WHERE promotion_uid = ?').get(req.params.promotionUid)
+
+  if (!run) return res.status(404).json({ error: 'NOT_FOUND', message: 'Promotion introuvable' })
+  if (run.is_rolled_back) return res.status(409).json({ error: 'ALREADY_ROLLED_BACK', message: 'Cette promotion a déjà été annulée' })
+
+  const daysSince = (Date.now() - new Date(run.executed_at).getTime()) / (24 * 60 * 60 * 1000)
+  if (daysSince > 30) {
+    return res.status(403).json({ error: 'WINDOW_EXPIRED', message: "Délai d'annulation de 30 jours dépassé" })
+  }
+
+  const details = db.prepare('SELECT * FROM promotion_details WHERE promotion_run_id = ?').all(run.id)
+  const newYearId = run.academic_year_to
+
+  // Refuse if any promoted student already has real activity in the new
+  // year -- rolling back would silently orphan payments/grades rather than
+  // cleanly undoing the promotion.
+  const blocked = []
+  for (const d of details) {
+    if (!d.new_classroom_id) continue
+    const hasPayments = db.prepare('SELECT 1 FROM payments WHERE student_id = ? AND academic_year_id = ? LIMIT 1').get(d.student_id, newYearId)
+    const hasScores = db.prepare(`
+      SELECT 1 FROM assessment_scores sc
+      JOIN assessment_templates t ON t.id = sc.template_id
+      WHERE sc.student_id = ? AND t.academic_year_id = ? AND sc.is_deleted = 0 LIMIT 1
+    `).get(d.student_id, newYearId)
+    const hasReportCards = db.prepare('SELECT 1 FROM report_card_snapshots WHERE student_id = ? AND academic_year_id = ? LIMIT 1').get(d.student_id, newYearId)
+    if (hasPayments || hasScores || hasReportCards) {
+      const student = db.prepare('SELECT full_name FROM students WHERE id = ?').get(d.student_id)
+      blocked.push(student?.full_name || `#${d.student_id}`)
+    }
+  }
+  if (blocked.length > 0) {
+    return res.status(409).json({
+      error: 'ACTIVITY_EXISTS',
+      message: "Annulation impossible : des données ont déjà été enregistrées pour l'année suivante pour ces élèves",
+      students: blocked,
+    })
+  }
+
+  try {
+    db.transaction(() => {
+      for (const d of details) {
+        if (d.new_classroom_id) {
+          db.prepare('DELETE FROM enrollments WHERE student_id = ? AND classroom_id = ? AND academic_year_id = ?')
+            .run(d.student_id, d.new_classroom_id, newYearId)
+          db.prepare("UPDATE students SET is_redoublant = 0, updated_at = datetime('now') WHERE id = ?").run(d.student_id)
+        }
+        if (d.verdict === 'exclu') {
+          db.prepare("UPDATE students SET status = 'active', updated_at = datetime('now') WHERE id = ?").run(d.student_id)
+        } else if (!d.new_classroom_id) {
+          // graduated
+          db.prepare("UPDATE students SET status = 'active', updated_at = datetime('now') WHERE id = ?").run(d.student_id)
+        }
+      }
+
+      // Revert active year + current_academic_year_id back to the old one.
+      // The new year's classrooms/fee_types/etc. are left in place -- only
+      // the promotion's enrollment effects are reversed.
+      db.prepare('UPDATE academic_years SET is_active = 0 WHERE id = ?').run(newYearId)
+      db.prepare('UPDATE academic_years SET is_active = 1 WHERE id = ?').run(run.academic_year_from)
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('current_academic_year_id', ?, datetime('now'))")
+        .run(String(run.academic_year_from))
+
+      db.prepare(`
+        UPDATE promotion_runs
+        SET is_rolled_back = 1, rolled_back_at = datetime('now'), rolled_back_by = ?
+        WHERE id = ?
+      `).run(req.user.id, run.id)
+    })()
+
+    return res.json({ success: true })
+  } catch (err) {
+    console.error('[PROMOTION ROLLBACK]', err)
+    return res.status(500).json({ error: 'ROLLBACK_FAILED', message: "Erreur lors de l'annulation" })
+  }
+})
+
 module.exports = router
