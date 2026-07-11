@@ -11,6 +11,7 @@ export function AuthProvider({ children }) {
     const [user, setUser] = useState(null)
     const [loading, setLoading] = useState(true)
     const [idleWarning, setIdleWarning] = useState(false)
+    const [sessionMessage, setSessionMessage] = useState('')
     const warnRef = useRef(null)
     const logoutRef = useRef(null)
     const userRef = useRef(null)
@@ -20,12 +21,31 @@ export function AuthProvider({ children }) {
     const doLogout = useCallback(async () => {
         clearTimeout(warnRef.current)
         clearTimeout(logoutRef.current)
-        try { await api.post('/api/auth/logout') } catch {}
+        try { await api.post('/api/auth/logout') } catch { /* token already invalid client-side regardless */ }
         sessionStorage.removeItem(SESSION_KEY)
         delete api.defaults.headers.common['Authorization']
         setUser(null)
         setIdleWarning(false)
     }, [])
+
+    // Local-only cleanup for when the session is already dead server-side
+    // (replaced by a login elsewhere) -- calling /api/auth/logout here would
+    // just 401 again for no benefit.
+    const forceLogout = useCallback((message) => {
+        clearTimeout(warnRef.current)
+        clearTimeout(logoutRef.current)
+        sessionStorage.removeItem(SESSION_KEY)
+        delete api.defaults.headers.common['Authorization']
+        setUser(null)
+        setIdleWarning(false)
+        setSessionMessage(message)
+    }, [])
+
+    useEffect(() => {
+        const handler = () => forceLogout('Vous avez été déconnecté — connexion depuis un autre appareil.')
+        window.addEventListener('scola:session-replaced', handler)
+        return () => window.removeEventListener('scola:session-replaced', handler)
+    }, [forceLogout])
 
     const resetIdle = useCallback(() => {
         if (!userRef.current) return
@@ -95,6 +115,8 @@ export function AuthProvider({ children }) {
             isAuthenticated: !!user,
             idleWarning,
             stayLoggedIn: resetIdle,
+            sessionMessage,
+            clearSessionMessage: () => setSessionMessage(''),
         }}>
             {children}
         </AuthContext.Provider>

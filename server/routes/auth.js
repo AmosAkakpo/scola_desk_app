@@ -89,10 +89,18 @@ router.post('/login', async (req, res) => {
             })
         }
 
+        // Single session per account: a fresh id is stamped on the user row
+        // and embedded in the token. requireAuth rejects any older token
+        // whose id no longer matches -- the previous device gets logged out
+        // on its next action instead of both staying "logged in" at once.
+        const sessionId = generateUUID()
+        db.prepare("UPDATE users SET session_id = ? WHERE id = ?").run(sessionId, user.id)
+
         const token = signToken({
             userId: user.id,
             userUid: user.user_uid,
-            role: user.role_name
+            role: user.role_name,
+            sessionId
         })
 
         // Log successful login
@@ -152,6 +160,9 @@ router.get('/me', requireAuth, (req, res) => {
 // ─── POST /api/auth/logout ────────────────────────────────────────
 router.post('/logout', requireAuth, (req, res) => {
     const db = getDb()
+    // Clears session_id (not just the client's token) so a copy of this
+    // token can't be replayed as "still valid" before the next login.
+    db.prepare("UPDATE users SET session_id = NULL WHERE id = ?").run(req.user.id)
     db.prepare(`
     INSERT INTO audit_logs
       (user_id, action, entity_type, entity_id, ip_address)

@@ -18,6 +18,14 @@ api.interceptors.response.use(
     res => res,
     err => {
         const message = err.response?.data?.message || 'Erreur de connexion au serveur'
+        // Someone logged into this account elsewhere — fires no matter which
+        // page/component made the request. AuthContext listens for this to
+        // force a local logout with an explanatory message (a plain window
+        // event, not a direct import, to avoid a circular api.js<->AuthContext
+        // dependency).
+        if (err.response?.data?.error === 'SESSION_REPLACED') {
+            window.dispatchEvent(new CustomEvent('scola:session-replaced'))
+        }
         return Promise.reject({ ...err, friendlyMessage: message })
     }
 )

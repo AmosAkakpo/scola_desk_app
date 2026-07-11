@@ -123,6 +123,10 @@ function runMigrations() {
         {
             version: '016_matricule_format',
             run: require('./migration/016_matricule_format').migration016
+        },
+        {
+            version: '017_session_tracking',
+            run: require('./migration/017_session_tracking').migration017
         }
     ]
 

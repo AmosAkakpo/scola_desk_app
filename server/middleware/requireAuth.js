@@ -33,6 +33,7 @@ async function requireAuth(req, res, next) {
         u.role_id,
         u.is_active,
         u.is_deleted,
+        u.session_id,
         r.name  AS role_name,
         r.label AS role_label
       FROM users u
@@ -48,6 +49,19 @@ async function requireAuth(req, res, next) {
                 message: 'Utilisateur introuvable ou désactivé'
             })
         }
+
+        // Single session per account: someone logged in elsewhere since this
+        // token was issued (its sessionId no longer matches the DB's current
+        // one) -- reject with a distinct code so the frontend can explain
+        // why, instead of a generic "session expired".
+        if (!payload.sessionId || payload.sessionId !== user.session_id) {
+            return res.status(401).json({
+                error: 'SESSION_REPLACED',
+                message: 'Session terminée — connexion depuis un autre appareil'
+            })
+        }
+
+        delete user.session_id // internal-only, never needs to leave this middleware
 
         // Load permissions for this user's role
         // Admin gets all permissions without DB lookup

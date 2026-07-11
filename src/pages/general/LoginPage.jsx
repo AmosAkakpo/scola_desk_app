@@ -9,7 +9,7 @@ export default function LoginPage({ onLogin }) {
   const [loading, setLoading] = useState(false)
   const [schoolName, setSchoolName] = useState('')
   const [showReset, setShowReset] = useState(false)
-  const { login } = useAuth()
+  const { login, sessionMessage, clearSessionMessage } = useAuth()
 
   useEffect(() => {
     api.get('/api/activation/status').then(res => {
@@ -38,6 +38,13 @@ export default function LoginPage({ onLogin }) {
           <h1 className="text-xl font-medium text-steel-200">{schoolName || 'ScolaDesk'}</h1>
           <p className="text-steel-400 text-sm mt-1">Connexion</p>
         </div>
+
+        {sessionMessage && (
+          <div className="mb-4 px-3 py-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-start justify-between gap-2">
+            <p className="text-amber-400 text-xs">{sessionMessage}</p>
+            <button onClick={clearSessionMessage} className="text-amber-400/70 hover:text-amber-400 text-xs shrink-0">✕</button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
