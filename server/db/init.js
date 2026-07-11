@@ -127,6 +127,10 @@ function runMigrations() {
         {
             version: '017_session_tracking',
             run: require('./migration/017_session_tracking').migration017
+        },
+        {
+            version: '018_promotion_engine',
+            run: require('./migration/018_promotion_engine').migration018
         }
     ]
 

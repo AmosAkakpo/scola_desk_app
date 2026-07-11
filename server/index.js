@@ -40,6 +40,7 @@ app.use('/api/attendance', require('./routes/attendance'))
 app.use('/api/sync', require('./routes/sync'))
 app.use('/api/restore', require('./routes/restore'))
 app.use('/api/users', require('./routes/users'))
+app.use('/api/promotion', require('./routes/promotion'))
 
 // ─── Static frontend (multi-poste LAN access) ───────────────
 // Serves the built React app so secondary PCs on the school's network can
