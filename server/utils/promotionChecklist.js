@@ -1,3 +1,7 @@
+// National-exam-cohort logic is hidden for now (see promotionVerdicts.js)
+// -- keep in sync with that flag.
+const EXAM_COHORT_ENABLED = false
+
 // Shared by the checklist endpoint (Step 2, informational) and execute
 // (Step 4, which re-validates server-side before touching anything --
 // never trusts a stale client-side checklist).
@@ -35,31 +39,31 @@ function computeChecklist(db, yearId, hasSuccessfulFullSync) {
     detail: `${bulletinsGenerated}/${totalStudentsFinal} élèves`,
   })
 
-  // Gate 3: exam results recorded for every cohort student [always blocking,
-  // regardless of passing mode -- entry is manual and must be verified by
-  // the admin every time, never silently skipped because a mode makes the
-  // score not count toward the verdict].
-  const cohortLevels = db.prepare(
-    'SELECT id, name, exam_name FROM levels WHERE is_exam_cohort = 1 AND exam_name IS NOT NULL'
-  ).all()
-  for (const level of cohortLevels) {
-    const cohortStudents = db.prepare(`
-      SELECT COUNT(*) as cnt FROM enrollments e
-      JOIN classrooms c ON c.id = e.classroom_id AND c.level_id = ? AND c.is_deleted = 0
-      WHERE e.academic_year_id = ? AND e.is_deleted = 0 AND e.is_expelled = 0
-    `).get(level.id, yearId)?.cnt || 0
-    const recorded = db.prepare(`
-      SELECT COUNT(*) as cnt FROM national_exam_results ner
-      JOIN enrollments e ON e.student_id = ner.student_id AND e.academic_year_id = ner.academic_year_id
-      JOIN classrooms c ON c.id = e.classroom_id AND c.level_id = ?
-      WHERE ner.academic_year_id = ? AND ner.exam_type = ? AND ner.result IS NOT NULL AND e.is_deleted = 0 AND e.is_expelled = 0
-    `).get(level.id, yearId, level.exam_name)?.cnt || 0
-    gates.push({
-      key: `exam_results_${level.exam_name}`,
-      label: `Résultats ${level.exam_name} (${level.name})`,
-      status: cohortStudents > 0 && recorded >= cohortStudents ? 'ok' : 'blocked',
-      detail: `${recorded}/${cohortStudents} élèves`,
-    })
+  // Gate 3: exam results recorded for every cohort student -- hidden while
+  // EXAM_COHORT_ENABLED is false.
+  if (EXAM_COHORT_ENABLED) {
+    const cohortLevels = db.prepare(
+      'SELECT id, name, exam_name FROM levels WHERE is_exam_cohort = 1 AND exam_name IS NOT NULL'
+    ).all()
+    for (const level of cohortLevels) {
+      const cohortStudents = db.prepare(`
+        SELECT COUNT(*) as cnt FROM enrollments e
+        JOIN classrooms c ON c.id = e.classroom_id AND c.level_id = ? AND c.is_deleted = 0
+        WHERE e.academic_year_id = ? AND e.is_deleted = 0 AND e.is_expelled = 0
+      `).get(level.id, yearId)?.cnt || 0
+      const recorded = db.prepare(`
+        SELECT COUNT(*) as cnt FROM national_exam_results ner
+        JOIN enrollments e ON e.student_id = ner.student_id AND e.academic_year_id = ner.academic_year_id
+        JOIN classrooms c ON c.id = e.classroom_id AND c.level_id = ?
+        WHERE ner.academic_year_id = ? AND ner.exam_type = ? AND ner.result IS NOT NULL AND e.is_deleted = 0 AND e.is_expelled = 0
+      `).get(level.id, yearId, level.exam_name)?.cnt || 0
+      gates.push({
+        key: `exam_results_${level.exam_name}`,
+        label: `Résultats ${level.exam_name} (${level.name})`,
+        status: cohortStudents > 0 && recorded >= cohortStudents ? 'ok' : 'blocked',
+        detail: `${recorded}/${cohortStudents} élèves`,
+      })
+    }
   }
 
   // Gate 4: effectifs PDF downloaded today [blocking]

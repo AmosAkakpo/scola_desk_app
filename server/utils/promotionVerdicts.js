@@ -1,5 +1,14 @@
 const { resolveTarget } = require('./promotionMapping')
 
+// National-exam-cohort logic (owner request 2026-07-12): hidden for now,
+// not deleted -- the settings tab, the checklist item, and the Étape 2
+// entry grid are all hidden in the frontend, and this flag makes sure the
+// backend can't silently apply cohort rules from stale test data (a level
+// left flagged is_exam_cohort=1 from earlier testing) while it's off.
+// Flip to true once the feature is built out fully (manual classroom
+// assignment per exam, multi-exam support, etc.).
+const EXAM_COHORT_ENABLED = false
+
 // Shared by preview (Step 3) and execute (Step 4) so the verdict the admin
 // previews is exactly what gets applied -- no risk of the two computations
 // drifting apart over time.
@@ -64,7 +73,7 @@ function computeVerdicts(db, yearId, overrideMap = new Map()) {
       let admis = annualAvg !== null ? annualAvg >= threshold : false
       let examResult = null
 
-      if (classroom.is_exam_cohort && classroom.exam_name) {
+      if (EXAM_COHORT_ENABLED && classroom.is_exam_cohort && classroom.exam_name) {
         const rule = rulesByExam[classroom.exam_name] || { mode: 'moyenne_only', min_moyenne: 10 }
         threshold = rule.min_moyenne
         examResult = db.prepare(`

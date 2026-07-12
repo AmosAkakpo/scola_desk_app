@@ -3,6 +3,14 @@ import api from '../../utils/api'
 import ConfirmModal from '../../components/ConfirmModal'
 import { eq, useSettingsMsg, SaveConfirmModal } from './settingsShared'
 
+// National-exam-cohort feature (Examens nationaux tab + ExamensManager
+// below) is hidden for now (owner request 2026-07-12) -- not deleted, kept
+// ready for when the feature is built out fully (manual classroom
+// assignment per exam, multi-exam support). Keep in sync with the same
+// flag in server/utils/promotionVerdicts.js, promotionChecklist.js, and
+// src/pages/general/FinAnneePage.jsx.
+const EXAM_COHORT_ENABLED = false
+
 // Structure académique: niveaux, classes, matières + configuration
 // par niveau (évaluations, coefficients).
 // Every mutation goes through an explicit Enregistrer + the app's confirm
@@ -106,7 +114,7 @@ export default function StructureSettingsPage() {
             { key: 'subjects', label: 'Matières' },
             { key: 'assessments', label: 'Évaluations' },
             { key: 'coefficients', label: 'Coefficients' },
-            { key: 'examens', label: 'Examens nationaux' },
+            ...(EXAM_COHORT_ENABLED ? [{ key: 'examens', label: 'Examens nationaux' }] : []),
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-brand text-brand' : 'border-transparent text-steel-500 hover:text-steel-700'}`}>

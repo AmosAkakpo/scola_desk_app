@@ -2,8 +2,16 @@ import { useState, useEffect, useCallback } from 'react'
 import api from '../../utils/api'
 import ConfirmModal from '../../components/ConfirmModal'
 
-// Fin d'année wizard: Étape 1 (checklist) -> Étape 2 (résultats examens) ->
-// Étape 3 (aperçu) -> Étape 4 (exécution) -> Étape 5 (historique/rollback).
+// Fin d'année wizard: Étape 1 (checklist) -> Étape 2 (aperçu) -> Étape 3
+// (exécution) -> Étape 4 (historique/rollback).
+//
+// National-exam-cohort step (résultats examens) is hidden for now (owner
+// request 2026-07-12) -- not deleted, just not wired into the step flow.
+// Etape2ExamResults below still exists, unused, ready to be re-enabled once
+// the exam-cohort feature is built out fully (manual classroom assignment
+// per exam, multi-exam support). Keep EXAM_COHORT_ENABLED here in sync with
+// the same flag in server/utils/promotionVerdicts.js and promotionChecklist.js.
+const EXAM_COHORT_ENABLED = false
 
 // Best-effort guess for the new year's label -- always shown as an editable,
 // pre-filled field the admin confirms or changes, never applied silently.
@@ -35,15 +43,15 @@ export default function FinAnneePage() {
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-steel-900">Fin d'année — {yearLabel}</h1>
-        <p className="text-sm text-steel-500 mt-1">Vérifications, résultats d'examens, promotion des élèves.</p>
+        <p className="text-sm text-steel-500 mt-1">Vérifications, promotion des élèves.</p>
       </div>
 
-      {/* Steps are freely clickable -- results entry in particular (Étape 2)
-          shouldn't require finishing the checklist first, since national
-          exam results often arrive before the rest of the year-end admin
-          work is done. */}
+      {/* Steps are freely clickable, no sequential gating. */}
       <div className="flex items-center gap-2 text-xs text-steel-500">
-        {['Vérifications', 'Résultats examens', 'Aperçu', 'Exécution', 'Historique'].map((label, i) => (
+        {(EXAM_COHORT_ENABLED
+          ? ['Vérifications', 'Résultats examens', 'Aperçu', 'Exécution', 'Historique']
+          : ['Vérifications', 'Aperçu', 'Exécution', 'Historique']
+        ).map((label, i) => (
           <button key={label} onClick={() => setStep(i + 1)}
             className={`px-3 py-1.5 rounded-full transition-colors ${step === i + 1 ? 'bg-brand text-white font-medium' : 'bg-steel-100 hover:bg-steel-200 text-steel-600'}`}>
             {i + 1}. {label}
@@ -51,21 +59,42 @@ export default function FinAnneePage() {
         ))}
       </div>
 
-      {step === 1 && <Etape1Checklist onNext={() => setStep(2)} />}
-      {step === 2 && <Etape2ExamResults yearId={yearId} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
-      {step === 3 && (
-        <Etape3Preview yearId={yearId}
-          onBack={() => setStep(2)}
-          onNext={(rows, overrides) => { setPreviewRows(rows); setOverrides(overrides); setStep(4) }}
-        />
+      {EXAM_COHORT_ENABLED ? (
+        <>
+          {step === 1 && <Etape1Checklist onNext={() => setStep(2)} />}
+          {step === 2 && <Etape2ExamResults yearId={yearId} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
+          {step === 3 && (
+            <Etape3Preview yearId={yearId}
+              onBack={() => setStep(2)}
+              onNext={(rows, overrides) => { setPreviewRows(rows); setOverrides(overrides); setStep(4) }}
+            />
+          )}
+          {step === 4 && (
+            <Etape4Execute yearId={yearId} yearLabel={yearLabel} overrides={overrides} previewRows={previewRows}
+              onBack={() => setStep(3)}
+              onDone={() => setStep(5)}
+            />
+          )}
+          {step === 5 && <Etape5History />}
+        </>
+      ) : (
+        <>
+          {step === 1 && <Etape1Checklist onNext={() => setStep(2)} />}
+          {step === 2 && (
+            <Etape3Preview yearId={yearId}
+              onBack={() => setStep(1)}
+              onNext={(rows, overrides) => { setPreviewRows(rows); setOverrides(overrides); setStep(3) }}
+            />
+          )}
+          {step === 3 && (
+            <Etape4Execute yearId={yearId} yearLabel={yearLabel} overrides={overrides} previewRows={previewRows}
+              onBack={() => setStep(2)}
+              onDone={() => setStep(4)}
+            />
+          )}
+          {step === 4 && <Etape5History />}
+        </>
       )}
-      {step === 4 && (
-        <Etape4Execute yearId={yearId} yearLabel={yearLabel} overrides={overrides} previewRows={previewRows}
-          onBack={() => setStep(3)}
-          onDone={() => setStep(5)}
-        />
-      )}
-      {step === 5 && <Etape5History />}
     </div>
   )
 }
@@ -76,7 +105,7 @@ export default function FinAnneePage() {
 const CHECKLIST_ITEMS = [
   { key: 'grades', label: 'Les notes de la période finale sont saisies pour toutes les classes' },
   { key: 'bulletins', label: 'Les bulletins ont été générés' },
-  { key: 'exams', label: "Les résultats des examens nationaux ont été saisis (s'il y en a)" },
+  ...(EXAM_COHORT_ENABLED ? [{ key: 'exams', label: "Les résultats des examens nationaux ont été saisis (s'il y en a)" }] : []),
   { key: 'effectifs', label: "Le résumé des effectifs a été téléchargé et envoyé à ScolaDesk" },
   { key: 'sync', label: "La synchronisation a été effectuée aujourd'hui" },
   { key: 'notes_verified', label: 'Les notes ont été vérifiées par les élèves/parents' },
