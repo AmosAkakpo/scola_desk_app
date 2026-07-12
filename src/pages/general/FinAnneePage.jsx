@@ -38,11 +38,16 @@ export default function FinAnneePage() {
         <p className="text-sm text-steel-500 mt-1">Vérifications, résultats d'examens, promotion des élèves.</p>
       </div>
 
+      {/* Steps are freely clickable -- results entry in particular (Étape 2)
+          shouldn't require finishing the checklist first, since national
+          exam results often arrive before the rest of the year-end admin
+          work is done. */}
       <div className="flex items-center gap-2 text-xs text-steel-500">
         {['Vérifications', 'Résultats examens', 'Aperçu', 'Exécution', 'Historique'].map((label, i) => (
-          <div key={label} className={`px-3 py-1.5 rounded-full ${step === i + 1 ? 'bg-brand text-white font-medium' : 'bg-steel-100'}`}>
+          <button key={label} onClick={() => setStep(i + 1)}
+            className={`px-3 py-1.5 rounded-full transition-colors ${step === i + 1 ? 'bg-brand text-white font-medium' : 'bg-steel-100 hover:bg-steel-200 text-steel-600'}`}>
             {i + 1}. {label}
-          </div>
+          </button>
         ))}
       </div>
 
@@ -419,6 +424,18 @@ function Etape4Execute({ yearId, yearLabel, overrides, previewRows, onDone, onBa
     acc[key] = (acc[key] || 0) + 1
     return acc
   }, {})
+
+  // Steps are freely navigable now (see FinAnneePage) -- landing here
+  // without having gone through Étape 3 would otherwise show a misleading
+  // "0 students" summary right before a real, transactional execute.
+  if (previewRows.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-steel-200 p-6 space-y-4">
+        <p className="text-sm text-steel-500">Aucun aperçu généré. Passez d'abord par l'étape « Aperçu » pour calculer les verdicts.</p>
+        <button onClick={onBack} className="px-4 py-2 border border-steel-200 rounded-lg text-sm text-steel-600 hover:bg-steel-50">Retour à l'aperçu</button>
+      </div>
+    )
+  }
 
   async function handleExecute() {
     setExecuting(true)
