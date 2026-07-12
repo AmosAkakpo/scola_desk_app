@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import api from '../../utils/api'
 import ConfirmModal from '../../components/ConfirmModal'
+import Pagination from '../../components/Pagination'
 
 // Fin d'année wizard: Étape 1 (checklist) -> Étape 2 (aperçu) -> Étape 3
 // (exécution) -> Étape 4 (historique/rollback).
@@ -20,13 +22,32 @@ function suggestNextLabel(label) {
   if (!m) return ''
   return `${parseInt(m[1]) + 1}-${parseInt(m[2]) + 1}`
 }
+// Persisted so leaving the page (settings, another module) and coming back
+// doesn't reset progress -- but still enforces "no skipping ahead" (owner
+// request 2026-07-12: strict step order, since free navigation was only
+// ever needed to reach exam entry, which is now hidden).
+const MAX_STEP_STORAGE_KEY = 'scola_fin_annee_max_step'
+
 export default function FinAnneePage() {
   const [step, setStep] = useState(1)
+  const [maxStepReached, setMaxStepReached] = useState(() => {
+    const stored = parseInt(sessionStorage.getItem(MAX_STEP_STORAGE_KEY))
+    return stored >= 1 ? stored : 1
+  })
   const [yearId, setYearId] = useState(null)
   const [yearLabel, setYearLabel] = useState('')
   const [loading, setLoading] = useState(true)
-  const [previewRows, setPreviewRows] = useState([])
+  const [previewSummary, setPreviewSummary] = useState(null)
   const [overrides, setOverrides] = useState([])
+
+  function advanceTo(n) {
+    setStep(n)
+    setMaxStepReached(prev => {
+      const next = Math.max(prev, n)
+      sessionStorage.setItem(MAX_STEP_STORAGE_KEY, String(next))
+      return next
+    })
+  }
 
   useEffect(() => {
     api.get('/api/settings/academic').then(res => {
@@ -46,50 +67,59 @@ export default function FinAnneePage() {
         <p className="text-sm text-steel-500 mt-1">Vérifications, promotion des élèves.</p>
       </div>
 
-      {/* Steps are freely clickable, no sequential gating. */}
+      {/* Strict order: a step is only clickable once actually reached via
+          its "Continuer"/"Commencer" action, never skipped ahead to. */}
       <div className="flex items-center gap-2 text-xs text-steel-500">
         {(EXAM_COHORT_ENABLED
           ? ['Vérifications', 'Résultats examens', 'Aperçu', 'Exécution', 'Historique']
           : ['Vérifications', 'Aperçu', 'Exécution', 'Historique']
-        ).map((label, i) => (
-          <button key={label} onClick={() => setStep(i + 1)}
-            className={`px-3 py-1.5 rounded-full transition-colors ${step === i + 1 ? 'bg-brand text-white font-medium' : 'bg-steel-100 hover:bg-steel-200 text-steel-600'}`}>
-            {i + 1}. {label}
-          </button>
-        ))}
+        ).map((label, i) => {
+          const n = i + 1
+          const reachable = n <= maxStepReached
+          return (
+            <button key={label} onClick={() => reachable && setStep(n)} disabled={!reachable}
+              className={`px-3 py-1.5 rounded-full transition-colors ${
+                step === n ? 'bg-brand text-white font-medium'
+                  : reachable ? 'bg-steel-100 hover:bg-steel-200 text-steel-600'
+                    : 'bg-steel-50 text-steel-300 cursor-not-allowed'
+              }`}>
+              {n}. {label}
+            </button>
+          )
+        })}
       </div>
 
       {EXAM_COHORT_ENABLED ? (
         <>
-          {step === 1 && <Etape1Checklist onNext={() => setStep(2)} />}
-          {step === 2 && <Etape2ExamResults yearId={yearId} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
+          {step === 1 && <Etape1Checklist onNext={() => advanceTo(2)} />}
+          {step === 2 && <Etape2ExamResults yearId={yearId} onBack={() => setStep(1)} onNext={() => advanceTo(3)} />}
           {step === 3 && (
             <Etape3Preview yearId={yearId}
               onBack={() => setStep(2)}
-              onNext={(rows, overrides) => { setPreviewRows(rows); setOverrides(overrides); setStep(4) }}
+              onNext={(summary, overrides) => { setPreviewSummary(summary); setOverrides(overrides); advanceTo(4) }}
             />
           )}
           {step === 4 && (
-            <Etape4Execute yearId={yearId} yearLabel={yearLabel} overrides={overrides} previewRows={previewRows}
+            <Etape4Execute yearId={yearId} yearLabel={yearLabel} overrides={overrides} previewSummary={previewSummary}
               onBack={() => setStep(3)}
-              onDone={() => setStep(5)}
+              onDone={() => advanceTo(5)}
             />
           )}
           {step === 5 && <Etape5History />}
         </>
       ) : (
         <>
-          {step === 1 && <Etape1Checklist onNext={() => setStep(2)} />}
+          {step === 1 && <Etape1Checklist onNext={() => advanceTo(2)} />}
           {step === 2 && (
             <Etape3Preview yearId={yearId}
               onBack={() => setStep(1)}
-              onNext={(rows, overrides) => { setPreviewRows(rows); setOverrides(overrides); setStep(3) }}
+              onNext={(summary, overrides) => { setPreviewSummary(summary); setOverrides(overrides); advanceTo(3) }}
             />
           )}
           {step === 3 && (
-            <Etape4Execute yearId={yearId} yearLabel={yearLabel} overrides={overrides} previewRows={previewRows}
+            <Etape4Execute yearId={yearId} yearLabel={yearLabel} overrides={overrides} previewSummary={previewSummary}
               onBack={() => setStep(2)}
-              onDone={() => setStep(4)}
+              onDone={() => advanceTo(4)}
             />
           )}
           {step === 4 && <Etape5History />}
@@ -107,11 +137,16 @@ const CHECKLIST_ITEMS = [
   { key: 'bulletins', label: 'Les bulletins ont été générés' },
   ...(EXAM_COHORT_ENABLED ? [{ key: 'exams', label: "Les résultats des examens nationaux ont été saisis (s'il y en a)" }] : []),
   { key: 'effectifs', label: "Le résumé des effectifs a été téléchargé et envoyé à ScolaDesk" },
-  { key: 'sync', label: "La synchronisation a été effectuée aujourd'hui" },
   { key: 'notes_verified', label: 'Les notes ont été vérifiées par les élèves/parents' },
   { key: 'bulletins_remis', label: 'Les bulletins ont été remis' },
   { key: 'salaires', label: 'Tous les salaires du personnel ont été payés' },
 ]
+
+// Sync is the one automatic, hard-blocking check (owner request 2026-07-12)
+// — everything else on this page is self-declared. Must have a successful
+// full sync within the last 24h; reuses /api/sync/status (Phase 7) rather
+// than a new endpoint.
+const SYNC_FRESHNESS_MS = 24 * 60 * 60 * 1000
 
 // Kept in sessionStorage, not component state -- the admin navigates to
 // other pages (settings, exam grid, etc.) mid-checklist and comes back, so
@@ -127,21 +162,60 @@ function Etape1Checklist({ onNext }) {
     catch { return {} }
   })
   const [showConfirm, setShowConfirm] = useState(false)
+  const [syncStatus, setSyncStatus] = useState(null) // { last_success_at } | null while loading
+  const [checkingSync, setCheckingSync] = useState(true)
 
   useEffect(() => {
     sessionStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(toggles))
   }, [toggles])
 
+  const checkSync = useCallback(() => {
+    setCheckingSync(true)
+    api.get('/api/sync/status').then(res => {
+      setSyncStatus(res.data)
+      setCheckingSync(false)
+    }).catch(() => setCheckingSync(false))
+  }, [])
+
+  useEffect(() => { checkSync() }, [checkSync])
+
+  const syncOk = !!syncStatus?.last_success_at &&
+    (Date.now() - new Date(syncStatus.last_success_at).getTime()) < SYNC_FRESHNESS_MS
+
   const allChecked = CHECKLIST_ITEMS.every(item => toggles[item.key])
+  const ready = allChecked && syncOk
 
   return (
     <div className="bg-white rounded-xl border border-steel-200 p-6 space-y-6">
+      <div>
+        <h2 className="text-sm font-semibold text-steel-800 mb-1">Synchronisation</h2>
+        <p className="text-xs text-steel-500 mb-3">Vérifié automatiquement — une synchronisation réussie de moins de 24h est obligatoire.</p>
+        <div className={`flex items-center justify-between px-4 py-2.5 rounded-lg border text-sm ${
+          checkingSync ? 'border-steel-200 bg-steel-50 text-steel-500'
+            : syncOk ? 'border-green-200 bg-green-50 text-green-700'
+              : 'border-red-200 bg-red-50 text-red-700'
+        }`}>
+          <span className="flex items-center gap-2">
+            <span className="font-bold">{checkingSync ? '…' : syncOk ? '✓' : '✕'}</span>
+            {checkingSync ? 'Vérification...' : syncOk
+              ? `Synchronisé le ${new Date(syncStatus.last_success_at).toLocaleString('fr-FR')}`
+              : syncStatus?.last_success_at
+                ? `Dernière synchronisation trop ancienne (${new Date(syncStatus.last_success_at).toLocaleString('fr-FR')})`
+                : 'Aucune synchronisation réussie'}
+          </span>
+          <span className="flex items-center gap-3 text-xs shrink-0">
+            <button onClick={checkSync} className="text-brand hover:underline">Réessayer</button>
+            <Link to="/sync" className="text-brand hover:underline">Aller à Synchronisation →</Link>
+          </span>
+        </div>
+      </div>
+
       <div>
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-sm font-semibold text-steel-800">Vérifications</h2>
           <button onClick={() => setToggles({})} className="text-xs text-steel-400 hover:text-steel-600">Réinitialiser</button>
         </div>
-        <p className="text-xs text-steel-500 mb-3">Cochez vous-même chaque point après vérification — rien n'est vérifié automatiquement. Vos coches restent enregistrées même si vous quittez cette page.</p>
+        <p className="text-xs text-steel-500 mb-3">Cochez vous-même chaque point après vérification — rien d'autre n'est vérifié automatiquement. Vos coches restent enregistrées même si vous quittez cette page.</p>
         <div className="space-y-2">
           {CHECKLIST_ITEMS.map(item => (
             <label key={item.key} className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-steel-200 text-sm text-steel-700 cursor-pointer hover:bg-steel-50">
@@ -154,7 +228,7 @@ function Etape1Checklist({ onNext }) {
         </div>
       </div>
 
-      <button onClick={() => setShowConfirm(true)} disabled={!allChecked}
+      <button onClick={() => setShowConfirm(true)} disabled={!ready}
         className="w-full py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium">
         Commencer la promotion
       </button>
@@ -313,47 +387,84 @@ function ExamGrid({ yearId, examType }) {
 // ─── Étape 3 — Aperçu (verdicts + overrides) ──────────────────
 const VERDICT_LABEL = { admis: 'Admis', doublant: 'Doublant', exclu: 'Exclu' }
 const VERDICT_STYLE = { admis: 'text-green-600', doublant: 'text-amber-600', exclu: 'text-red-600' }
+const PREVIEW_PAGE_SIZE = 50
+
+// Confirmed overrides (persisted -- survives navigating away and back).
+// The in-progress edit inside the modal (draftVerdict/draftReason below)
+// is deliberately NOT persisted here and NOT part of load()'s dependencies
+// -- otherwise every keystroke in the reason textarea would refire the
+// preview request.
+const OVERRIDES_STORAGE_KEY = 'scola_fin_annee_overrides'
 
 function Etape3Preview({ yearId, onBack, onNext }) {
   const [rows, setRows] = useState([])
+  const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [overrideDrafts, setOverrideDrafts] = useState({}) // student_id -> { verdict, reason }
+  const [overrides, setOverrides] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem(OVERRIDES_STORAGE_KEY)) || [] }
+    catch { return [] }
+  })
   const [editingId, setEditingId] = useState(null)
+  const [draftVerdict, setDraftVerdict] = useState('')
+  const [draftReason, setDraftReason] = useState('')
+  const [verdictFilter, setVerdictFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
 
-  const load = useCallback((overrides = []) => {
+  useEffect(() => {
+    sessionStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(overrides))
+  }, [overrides])
+
+  // 300ms debounce on the search box, same convention as other heavy list
+  // pages (Élèves, Paiements) -- avoids firing a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => { setSearch(searchInput); setPage(1) }, 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  const load = useCallback(() => {
     setLoading(true)
-    api.post(`/api/promotion/preview/${yearId}`, { overrides }).then(res => {
+    api.post(`/api/promotion/preview/${yearId}`, {
+      overrides,
+      verdict_filter: verdictFilter || undefined,
+      search: search || undefined,
+      page,
+      page_size: PREVIEW_PAGE_SIZE,
+    }).then(res => {
       setRows(res.data.rows || [])
+      setTotal(res.data.total || 0)
       setSummary(res.data.summary)
       setLoading(false)
     })
-  }, [yearId])
+  }, [yearId, verdictFilter, search, page, overrides])
 
   useEffect(() => { load() }, [load])
 
-  function applyOverride(row) {
-    const draft = overrideDrafts[row.student_id]
-    if (!draft?.verdict || !draft?.reason?.trim()) return
-    const overrides = Object.entries(overrideDrafts)
-      .filter(([, d]) => d.verdict && d.reason?.trim())
-      .map(([student_id, d]) => ({ student_id: parseInt(student_id), verdict: d.verdict, reason: d.reason.trim() }))
-    setEditingId(null)
-    load(overrides)
+  function openEdit(row) {
+    setEditingId(row.student_id)
+    setDraftVerdict(row.verdict)
+    setDraftReason('')
   }
 
-  function getCurrentOverrides() {
-    return Object.entries(overrideDrafts)
-      .filter(([, d]) => d.verdict && d.reason?.trim())
-      .map(([student_id, d]) => ({ student_id: parseInt(student_id), verdict: d.verdict, reason: d.reason.trim() }))
+  function applyOverride() {
+    if (!draftVerdict || !draftReason.trim()) return
+    setOverrides(prev => [
+      ...prev.filter(o => o.student_id !== editingId),
+      { student_id: editingId, verdict: draftVerdict, reason: draftReason.trim() },
+    ])
+    setEditingId(null)
   }
+
+  const totalPages = Math.ceil(total / PREVIEW_PAGE_SIZE)
 
   if (loading && rows.length === 0) return <div className="bg-white rounded-xl border border-steel-200 p-6"><p className="text-sm text-steel-400">Calcul en cours...</p></div>
 
   return (
     <div className="bg-white rounded-xl border border-steel-200 p-6 space-y-4">
       {summary && (
-        <div className="flex gap-4 text-sm">
+        <div className="flex flex-wrap gap-4 text-sm">
           <span className="text-green-600 font-medium">{summary.admis} admis</span>
           <span className="text-amber-600 font-medium">{summary.doublant} doublant(s)</span>
           <span className="text-steel-600 font-medium">{summary.graduated} diplômé(s)</span>
@@ -363,6 +474,20 @@ function Etape3Preview({ yearId, onBack, onNext }) {
           )}
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <input type="text" value={searchInput} onChange={e => setSearchInput(e.target.value)}
+          placeholder="Rechercher un élève (nom ou matricule)"
+          className="flex-1 min-w-[200px] px-3 py-1.5 border border-steel-200 rounded-lg text-xs focus:outline-none focus:border-brand" />
+        <select value={verdictFilter} onChange={e => { setVerdictFilter(e.target.value); setPage(1) }}
+          className="px-3 py-1.5 border border-steel-200 rounded-lg text-xs bg-white focus:outline-none focus:border-brand">
+          <option value="">Tous les verdicts</option>
+          <option value="admis">Admis</option>
+          <option value="doublant">Doublant</option>
+          <option value="exclu">Exclu</option>
+        </select>
+        {loading && <span className="text-xs text-steel-400">Chargement...</span>}
+      </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -393,35 +518,37 @@ function Etape3Preview({ yearId, onBack, onNext }) {
                   {r.graduated ? 'Diplômé' : r.target_classroom ? `${r.target_classroom}${r.target_is_new_level ? ' (nouvelle)' : ''}` : '—'}
                 </td>
                 <td className="py-2 text-center">
-                  <button onClick={() => setEditingId(editingId === r.student_id ? null : r.student_id)}
+                  <button onClick={() => openEdit(r)}
                     className="text-xs text-brand hover:underline">Modifier</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {rows.length === 0 && !loading && <p className="text-sm text-steel-400 text-center py-6">Aucun élève trouvé.</p>}
       </div>
 
-      {editingId && (() => {
+      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+
+      {editingId !== null && (() => {
         const row = rows.find(r => r.student_id === editingId)
-        const draft = overrideDrafts[editingId] || {}
         return (
           <ConfirmModal
-            title={`Modifier le verdict — ${row?.full_name}`}
+            title={`Modifier le verdict — ${row?.full_name || ''}`}
             message="La modification manuelle nécessite un motif."
             confirmLabel="Appliquer"
             onCancel={() => setEditingId(null)}
-            onConfirm={() => applyOverride(row)}
+            onConfirm={applyOverride}
           >
             <div className="space-y-2">
-              <select value={draft.verdict || ''} onChange={e => setOverrideDrafts(prev => ({ ...prev, [editingId]: { ...prev[editingId], verdict: e.target.value } }))}
+              <select value={draftVerdict} onChange={e => setDraftVerdict(e.target.value)}
                 className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
                 <option value="">— Choisir un verdict —</option>
                 <option value="admis">Admis</option>
                 <option value="doublant">Doublant</option>
                 <option value="exclu">Exclu</option>
               </select>
-              <textarea value={draft.reason || ''} onChange={e => setOverrideDrafts(prev => ({ ...prev, [editingId]: { ...prev[editingId], reason: e.target.value } }))}
+              <textarea value={draftReason} onChange={e => setDraftReason(e.target.value)}
                 placeholder="Motif (obligatoire)" rows={2}
                 className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand" />
             </div>
@@ -431,7 +558,7 @@ function Etape3Preview({ yearId, onBack, onNext }) {
 
       <div className="flex gap-3">
         <button onClick={onBack} className="px-4 py-2 border border-steel-200 rounded-lg text-sm text-steel-600 hover:bg-steel-50">Retour</button>
-        <button onClick={() => onNext(rows, getCurrentOverrides())}
+        <button onClick={() => onNext(summary, overrides)}
           className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium">
           Continuer vers l'exécution
         </button>
@@ -441,23 +568,20 @@ function Etape3Preview({ yearId, onBack, onNext }) {
 }
 
 // ─── Étape 4 — Exécution ──────────────────────────────────────
-function Etape4Execute({ yearId, yearLabel, overrides, previewRows, onDone, onBack }) {
+function Etape4Execute({ yearId, yearLabel, overrides, previewSummary, onDone, onBack }) {
   const [newLabel, setNewLabel] = useState(suggestNextLabel(yearLabel))
   const [carryForward, setCarryForward] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [executing, setExecuting] = useState(false)
   const [error, setError] = useState('')
 
-  const summary = previewRows.reduce((acc, r) => {
-    const key = r.graduated ? 'graduated' : r.verdict
-    acc[key] = (acc[key] || 0) + 1
-    return acc
-  }, {})
+  const summary = previewSummary || {}
 
-  // Steps are freely navigable now (see FinAnneePage) -- landing here
-  // without having gone through Étape 3 would otherwise show a misleading
-  // "0 students" summary right before a real, transactional execute.
-  if (previewRows.length === 0) {
+  // Landing here without having gone through Étape 3 first (shouldn't
+  // normally happen now that steps are strictly sequential, but guard
+  // anyway) would otherwise show a misleading "0 students" summary right
+  // before a real, transactional execute.
+  if (!previewSummary) {
     return (
       <div className="bg-white rounded-xl border border-steel-200 p-6 space-y-4">
         <p className="text-sm text-steel-500">Aucun aperçu généré. Passez d'abord par l'étape « Aperçu » pour calculer les verdicts.</p>
@@ -477,6 +601,7 @@ function Etape4Execute({ yearId, yearLabel, overrides, previewRows, onDone, onBa
         confirm_text: 'PROMOTION',
       })
       sessionStorage.removeItem(CHECKLIST_STORAGE_KEY)
+      sessionStorage.removeItem(OVERRIDES_STORAGE_KEY)
       setShowConfirm(false)
       onDone()
     } catch (err) {

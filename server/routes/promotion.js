@@ -177,15 +177,22 @@ router.get('/checklist/:academicYearId', (req, res) => {
 // ─── POST /api/promotion/preview/:academicYearId — Étape 3 verdicts ───────
 // POST (not GET) because it accepts an overrides array in the body.
 // Pure read -- computes but persists nothing.
+//
+// verdict_filter/search/page/page_size trim the RESPONSE, not the
+// computation -- summary counts must always reflect the whole school, so
+// computeVerdicts still runs over every student every time. This only cuts
+// down what actually gets serialized and rendered client-side, which is
+// the heavy part on a large school (hundreds of rows in one table).
 router.post('/preview/:academicYearId', (req, res) => {
   const db = getDb()
   const overrides = req.body?.overrides || [] // [{ student_id, verdict, reason }]
   const overrideMap = new Map(overrides.map(o => [o.student_id, o]))
+  const { verdict_filter, search, page = 1, page_size = 50 } = req.body || {}
 
   const { rows, summary } = computeVerdicts(db, req.params.academicYearId, overrideMap)
 
   // Preview only needs display fields, not the raw target object execute uses.
-  const displayRows = rows.map(r => ({
+  let displayRows = rows.map(r => ({
     student_id: r.student_id,
     full_name: r.full_name,
     matricule: r.matricule,
@@ -203,7 +210,22 @@ router.post('/preview/:academicYearId', (req, res) => {
     target_is_new_level: r.target?.is_new_level || false,
   }))
 
-  return res.json({ rows: displayRows, summary })
+  if (verdict_filter && ['admis', 'doublant', 'exclu'].includes(verdict_filter)) {
+    displayRows = displayRows.filter(r => r.verdict === verdict_filter)
+  }
+  if (search?.trim()) {
+    const q = search.trim().toLowerCase()
+    displayRows = displayRows.filter(r =>
+      r.full_name.toLowerCase().includes(q) || r.matricule?.toLowerCase().includes(q)
+    )
+  }
+
+  const total = displayRows.length
+  const pageNum = Math.max(1, parseInt(page) || 1)
+  const pageSizeNum = Math.max(1, parseInt(page_size) || 50)
+  const paged = displayRows.slice((pageNum - 1) * pageSizeNum, pageNum * pageSizeNum)
+
+  return res.json({ rows: paged, total, page: pageNum, page_size: pageSizeNum, summary })
 })
 
 // ─── POST /api/promotion/execute/:academicYearId — Étape 4 ────────────────
