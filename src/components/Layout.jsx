@@ -257,6 +257,9 @@ export default function Layout({ schoolInfo }) {
         <header className="h-12 bg-white border-b border-steel-200 flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
             <span className="text-sm text-steel-800 font-semibold">{schoolInfo?.school_name || ''}</span>
+            {schoolInfo?.academic_year_label && (
+              <span className="px-2 py-0.5 rounded bg-steel-100 text-steel-600 text-xs font-medium">{schoolInfo.academic_year_label}</span>
+            )}
             {schoolInfo?.tier && (
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${
                 schoolInfo.tier === 'PRO' ? 'bg-brand/10 text-brand' : 'bg-steel-100 text-steel-600'

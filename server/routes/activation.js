@@ -135,8 +135,14 @@ router.get('/status', (req, res) => {
   // (users are never synced) — the boot flow needs to detect that state.
   const userCount = db.prepare('SELECT COUNT(*) as cnt FROM users WHERE is_deleted = 0 AND is_active = 1').get()?.cnt || 0
 
+  const currentYearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
+  const academicYearLabel = currentYearId
+    ? db.prepare('SELECT label FROM academic_years WHERE id = ?').get(currentYearId)?.label || null
+    : null
+
   return res.json({
     activated: true,
+    academic_year_label: academicYearLabel,
     configured: config?.is_configured === 1,
     has_users: userCount > 0,
     license_status: licenseStatus,
