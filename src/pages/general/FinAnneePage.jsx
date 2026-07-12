@@ -79,21 +79,35 @@ const CHECKLIST_ITEMS = [
   { key: 'salaires', label: 'Tous les salaires du personnel ont été payés' },
 ]
 
+// Kept in sessionStorage, not component state -- the admin navigates to
+// other pages (settings, exam grid, etc.) mid-checklist and comes back, so
+// this must survive unmount/remount. It clears on its own once a promotion
+// actually executes (see Etape4Execute) and the admin can also wipe it by
+// hand with "Réinitialiser" -- it's never silently reset just from
+// navigating around.
+const CHECKLIST_STORAGE_KEY = 'scola_fin_annee_checklist'
+
 function Etape1Checklist({ onNext }) {
-  const [toggles, setToggles] = useState({})
+  const [toggles, setToggles] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem(CHECKLIST_STORAGE_KEY)) || {} }
+    catch { return {} }
+  })
   const [showConfirm, setShowConfirm] = useState(false)
 
-  // Reset every time this step opens -- a stale checklist from last year
-  // must not silently carry forward.
-  useEffect(() => { setToggles({}) }, [])
+  useEffect(() => {
+    sessionStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(toggles))
+  }, [toggles])
 
   const allChecked = CHECKLIST_ITEMS.every(item => toggles[item.key])
 
   return (
     <div className="bg-white rounded-xl border border-steel-200 p-6 space-y-6">
       <div>
-        <h2 className="text-sm font-semibold text-steel-800 mb-1">Vérifications</h2>
-        <p className="text-xs text-steel-500 mb-3">Cochez vous-même chaque point après vérification — rien n'est vérifié automatiquement.</p>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-sm font-semibold text-steel-800">Vérifications</h2>
+          <button onClick={() => setToggles({})} className="text-xs text-steel-400 hover:text-steel-600">Réinitialiser</button>
+        </div>
+        <p className="text-xs text-steel-500 mb-3">Cochez vous-même chaque point après vérification — rien n'est vérifié automatiquement. Vos coches restent enregistrées même si vous quittez cette page.</p>
         <div className="space-y-2">
           {CHECKLIST_ITEMS.map(item => (
             <label key={item.key} className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-steel-200 text-sm text-steel-700 cursor-pointer hover:bg-steel-50">
@@ -416,6 +430,7 @@ function Etape4Execute({ yearId, yearLabel, overrides, previewRows, onDone, onBa
         new_year_label: newLabel.trim(),
         confirm_text: 'PROMOTION',
       })
+      sessionStorage.removeItem(CHECKLIST_STORAGE_KEY)
       setShowConfirm(false)
       onDone()
     } catch (err) {
