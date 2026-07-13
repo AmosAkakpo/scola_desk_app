@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
 import api from '../../utils/api'
+import YearSwitcher from '../../components/YearSwitcher'
 
 function formatXOF(n) {
   if (n === null || n === undefined) return '—'
@@ -21,22 +21,22 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [catFilter, setCatFilter] = useState('')
-  const navigate = useNavigate()
+  const [yearId, setYearId] = useState(null) // null = current year
 
-  function load(month = monthFilter) {
+  const load = useCallback(() => {
     setLoading(true)
-    const params = month ? `?month=${month}` : ''
+    const params = { ...(monthFilter ? { month: monthFilter } : {}), ...(yearId ? { academic_year_id: yearId } : {}) }
     Promise.all([
-      api.get(`/api/finance/expenses${params}`),
-      api.get('/api/finance/expenses/months'),
+      api.get('/api/finance/expenses', { params }),
+      api.get('/api/finance/expenses/months', { params: yearId ? { academic_year_id: yearId } : {} }),
     ]).then(([expRes, monthsRes]) => {
       setData(expRes.data)
       setMonths(monthsRes.data.months || [])
       setLoading(false)
     }).catch(() => setLoading(false))
-  }
+  }, [monthFilter, yearId])
 
-  useEffect(() => { load() }, [monthFilter])
+  useEffect(() => { load() }, [load])
 
   // salary rows have row_type='salary' and no category_id; filter 'salaires' matches them
   const expenses = (data?.expenses || []).filter(e => {
@@ -53,10 +53,15 @@ export default function ExpensesPage() {
           <h1 className="text-xl font-medium text-steel-900">Dépenses</h1>
           <p className="text-sm text-steel-500 mt-0.5">{expenses.length} dépense(s) — {formatXOF(totalAmount)}</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowAdd(true)} className="px-3 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors">
-            + Ajouter
-          </button>
+        <div className="flex items-center gap-3">
+          <YearSwitcher yearId={yearId} onChange={setYearId} />
+          {yearId ? (
+            <span className="px-3 py-2 bg-amber-50 text-amber-600 rounded-lg text-xs font-medium">Année archivée — lecture seule</span>
+          ) : (
+            <button onClick={() => setShowAdd(true)} className="px-3 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors">
+              + Ajouter
+            </button>
+          )}
         </div>
       </div>
 
@@ -135,7 +140,7 @@ export default function ExpensesPage() {
                   <td className="px-4 py-2.5 text-steel-400 text-xs">{e.receipt_ref || '—'}</td>
                   <td className="px-4 py-2.5 text-steel-500 text-xs">{e.recorded_by_name || '—'}</td>
                   <td className="px-2 py-2.5">
-                    {e.row_type !== 'salary' && (
+                    {e.row_type !== 'salary' && !yearId && (
                       <button onClick={() => handleDelete(e.id)} className="text-steel-400 hover:text-red-500 text-xs">×</button>
                     )}
                   </td>

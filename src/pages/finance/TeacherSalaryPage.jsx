@@ -34,6 +34,9 @@ export default function TeacherSalaryPage() {
   const [month, setMonth] = useState(
     searchParams.get('pay_period') || new Date().toISOString().slice(0, 7)
   )
+  // Carried over from the list page when viewing a past (archived) year —
+  // read-only there, no payment form.
+  const archivedYearId = searchParams.get('academic_year_id') || null
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -62,7 +65,8 @@ export default function TeacherSalaryPage() {
 
   function load() {
     setLoading(true)
-    api.get(`/api/finance/salaries/${teacherId}?pay_period=${month}`).then(res => {
+    const params = new URLSearchParams({ pay_period: month, ...(archivedYearId ? { academic_year_id: archivedYearId } : {}) })
+    api.get(`/api/finance/salaries/${teacherId}?${params.toString()}`).then(res => {
       setData(res.data)
       // Pre-fill the amount with the calculated remaining for the month
       const expected = Math.max(0, (res.data.calculated_amount || 0) - (res.data.total_paid || 0))
@@ -72,7 +76,7 @@ export default function TeacherSalaryPage() {
   }
 
   useEffect(() => {
-    setSearchParams({ pay_period: month }, { replace: true })
+    setSearchParams({ pay_period: month, ...(archivedYearId ? { academic_year_id: archivedYearId } : {}) }, { replace: true })
     setAmount('') // reset so load() re-prefills for the new month
     setAdjustmentReason('')
     load()
@@ -172,7 +176,12 @@ export default function TeacherSalaryPage() {
         ))}
       </div>
 
-      {/* Add payment form */}
+      {/* Add payment form — hidden for an archived (past) year, read-only there */}
+      {archivedYearId ? (
+        <section className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 text-sm text-amber-700">
+          Année archivée — lecture seule. Aucun nouveau versement ne peut être enregistré ici.
+        </section>
+      ) : (
       <section className="bg-white rounded-xl border border-steel-200 p-4 mb-4">
         <h2 className="text-sm font-medium text-steel-700 mb-3">
           Ajouter un versement — <span className="font-normal text-steel-500">{monthLabel}</span>
@@ -241,6 +250,7 @@ export default function TeacherSalaryPage() {
           </div>
         </form>
       </section>
+      )}
 
       {/* Last recorded confirmation */}
       {lastReceipt && (

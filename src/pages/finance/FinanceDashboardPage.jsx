@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import YearSwitcher from '../../components/YearSwitcher'
 
 function formatXOF(n) {
   if (n === null || n === undefined) return '—'
@@ -21,17 +22,21 @@ export default function FinanceDashboardPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [yearId, setYearId] = useState(null) // null = current year
   const navigate = useNavigate()
 
-  useEffect(() => {
-    api.get('/api/finance/dashboard').then(res => {
+  const load = useCallback(() => {
+    setLoading(true)
+    api.get('/api/finance/dashboard', { params: yearId ? { academic_year_id: yearId } : {} }).then(res => {
       setData(res.data)
       setLoading(false)
     }).catch(err => {
       setError(err.response?.data?.message || err.message || 'Erreur inconnue')
       setLoading(false)
     })
-  }, [])
+  }, [yearId])
+
+  useEffect(() => { load() }, [load])
 
   if (loading) return <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" /></div>
   if (!data) return <p className="text-red-500 text-sm text-center py-12">Erreur de chargement{error ? ` — ${error}` : ''}</p>
@@ -45,11 +50,14 @@ export default function FinanceDashboardPage() {
           <h1 className="text-xl font-medium text-steel-900">Finance</h1>
           <p className="text-sm text-steel-500 mt-0.5">Vue d'ensemble financière</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => navigate('/finance/tuition')} className="px-3 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors">Paiements scolarité</button>
-          <button onClick={() => navigate('/finance/salaries')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Salaires</button>
-          <button onClick={() => navigate('/finance/expenses')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Dépenses</button>
-<button onClick={() => navigate('/finance/subscription')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Mon abonnement</button>
+        <div className="flex items-center gap-3">
+          <YearSwitcher yearId={yearId} onChange={setYearId} />
+          <div className="flex gap-2">
+            <button onClick={() => navigate('/finance/tuition')} className="px-3 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors">Paiements scolarité</button>
+            <button onClick={() => navigate('/finance/salaries')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Salaires</button>
+            <button onClick={() => navigate('/finance/expenses')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Dépenses</button>
+            <button onClick={() => navigate('/finance/subscription')} className="px-3 py-2 bg-white border border-steel-200 text-steel-700 hover:bg-steel-50 rounded-lg text-sm font-medium transition-colors">Mon abonnement</button>
+          </div>
         </div>
       </div>
 

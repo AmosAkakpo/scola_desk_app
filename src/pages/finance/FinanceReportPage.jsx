@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import api from '../../utils/api'
+import YearSwitcher from '../../components/YearSwitcher'
 
 function formatXOF(n) {
   if (n === null || n === undefined) return '—'
@@ -17,13 +18,17 @@ export default function FinanceReportPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [printing, setPrinting] = useState(false)
+  const [yearId, setYearId] = useState(null) // null = current year
 
-  useEffect(() => {
-    api.get('/api/finance/report').then(res => {
+  const load = useCallback(() => {
+    setLoading(true)
+    api.get('/api/finance/report', { params: yearId ? { academic_year_id: yearId } : {} }).then(res => {
       setData(res.data)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [])
+  }, [yearId])
+
+  useEffect(() => { load() }, [load])
 
   // Print only the report block (same pattern as receipt pages)
   useEffect(() => {
@@ -51,11 +56,14 @@ export default function FinanceReportPage() {
           <h1 className="text-xl font-medium text-steel-900">Rapport financier</h1>
           <p className="text-sm text-steel-500 mt-0.5">Vue mensuelle des flux — Année {year_label || '—'}</p>
         </div>
-        <button onClick={() => setPrinting(true)}
-          className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-          Imprimer
-        </button>
+        <div className="flex items-center gap-3">
+          <YearSwitcher yearId={yearId} onChange={setYearId} />
+          <button onClick={() => setPrinting(true)}
+            className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+            Imprimer
+          </button>
+        </div>
       </div>
 
       <div id="scola-print-content" className="bg-white rounded-xl border border-steel-200 overflow-hidden" style={printing ? { padding: '12mm 16mm', fontFamily: 'Arial, sans-serif' } : {}}>

@@ -7,7 +7,15 @@ const { requirePro } = require('../middleware/requirePro')
 const { generateUUID } = require('../utils/uid')
 const { autoAssignMandatoryFees, getFeeAmountForStudent, getStudentFeeSummary, getFeeSummariesForYear } = require('../utils/fees')
 
-function getYearId(db) {
+// Dashboard/salaries/expenses/report accept an optional academic_year_id
+// query param to view a past year read-only (owner request 2026-07-12:
+// finance data must stay reachable after a promotion moves the "current"
+// year forward). Every mutation route still calls getYearId(db) with no
+// req -- always the live current year, past years are never written to
+// through this mechanism.
+function getYearId(db, req) {
+  const override = req?.query?.academic_year_id
+  if (override) return override
   return db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
 }
 
@@ -80,11 +88,18 @@ function generateReceiptNumber(db, yearId, prefix) {
 // getFeeAmountForStudent + getStudentFeeSummary moved to ../utils/fees
 // (shared with reportcards.js for the payment banner) — logic unchanged.
 
+// ─── ACADEMIC YEARS (for the year-switcher dropdown) ───────
+router.get('/academic-years', requirePermission('finance.view'), (req, res) => {
+  const db = getDb()
+  const years = db.prepare('SELECT id, label, is_active FROM academic_years ORDER BY label DESC').all()
+  return res.json({ years })
+})
+
 // ─── DASHBOARD ──────────────────────────────────────────────
 
 router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
-  const yearId = getYearId(db)
+  const yearId = getYearId(db, req)
 
   const students = db.prepare(`
     SELECT s.id as student_id, c.level_id, e.classroom_id
@@ -526,7 +541,7 @@ router.post('/tuition/:studentId/pay', requirePermission('finance.edit'), (req, 
 
 router.get('/salaries', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
-  const yearId = getYearId(db)
+  const yearId = getYearId(db, req)
   const { pay_period } = req.query
   const targetMonth = pay_period || new Date().toISOString().slice(0, 7)
 
@@ -594,7 +609,7 @@ router.get('/salaries', requirePermission('finance.view'), (req, res) => {
 
 router.get('/salaries/:teacherId', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
-  const yearId = getYearId(db)
+  const yearId = getYearId(db, req)
   const { teacherId } = req.params
   const { pay_period } = req.query
   const targetMonth = pay_period || new Date().toISOString().slice(0, 7)
@@ -705,7 +720,7 @@ router.post('/salaries/:teacherId/pay', requirePermission('finance.edit'), (req,
 
 router.get('/expenses', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
-  const yearId = getYearId(db)
+  const yearId = getYearId(db, req)
   const { month, category_id } = req.query
 
   // Misc expenses
@@ -769,7 +784,7 @@ router.get('/expenses', requirePermission('finance.view'), (req, res) => {
 
 router.get('/expenses/months', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
-  const yearId = getYearId(db)
+  const yearId = getYearId(db, req)
 
   // Months with data = misc expenses UNION salary payments (both shown on the page)
   const months = db.prepare(`
@@ -953,7 +968,7 @@ router.delete('/revenue-categories/:id', requirePermission('finance.edit'), (req
 
 router.get('/report', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
-  const yearId = getYearId(db)
+  const yearId = getYearId(db, req)
   const year = yearId ? db.prepare('SELECT label, start_date, end_date FROM academic_years WHERE id = ?').get(yearId) : null
   const school = db.prepare('SELECT school_name, city, country FROM school_config LIMIT 1').get()
 

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import YearSwitcher from '../../components/YearSwitcher'
 
 function formatXOF(n) {
   if (n === null || n === undefined) return '—'
@@ -23,15 +24,23 @@ export default function SalariesPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [yearId, setYearId] = useState(null) // null = current year
   const navigate = useNavigate()
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true)
-    api.get(`/api/finance/salaries?pay_period=${month}`).then(res => {
+    api.get('/api/finance/salaries', { params: { pay_period: month, ...(yearId ? { academic_year_id: yearId } : {}) } }).then(res => {
       setData(res.data)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [month])
+  }, [month, yearId])
+
+  useEffect(() => { load() }, [load])
+
+  function goToTeacher(teacherId) {
+    const params = new URLSearchParams({ pay_period: month, ...(yearId ? { academic_year_id: yearId } : {}) })
+    navigate(`/finance/salaries/${teacherId}?${params.toString()}`)
+  }
 
   const teachers = data?.teachers || []
   const totalVerse = teachers.reduce((s, t) => s + t.total_paid, 0)
@@ -46,6 +55,7 @@ export default function SalariesPage() {
             {teachers.length} enseignant(s) — {formatXOF(totalVerse)} versés ce mois
           </p>
         </div>
+        <YearSwitcher yearId={yearId} onChange={setYearId} />
       </div>
 
       <div className="flex gap-3 mb-4">
@@ -53,6 +63,7 @@ export default function SalariesPage() {
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
           {getMonthOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
+        {yearId && <span className="px-3 py-2 bg-amber-50 text-amber-600 rounded-lg text-xs font-medium">Année archivée — lecture seule</span>}
       </div>
 
       {loading ? (
@@ -75,7 +86,7 @@ export default function SalariesPage() {
                 const taux = t.hours_prevues > 0 ? Math.round((t.hours_reelles / t.hours_prevues) * 100) : null
                 return (
                   <tr key={t.id} className="border-b border-steel-50 hover:bg-steel-50/50 cursor-pointer"
-                    onClick={() => navigate(`/finance/salaries/${t.id}?pay_period=${month}`)}>
+                    onClick={() => goToTeacher(t.id)}>
                     <td className="px-4 py-2.5">
                       <p className="text-steel-800 font-medium">{t.full_name}</p>
                       {t.matricule && <p className="text-[10px] text-steel-400 font-mono">{t.matricule}</p>}
@@ -103,7 +114,7 @@ export default function SalariesPage() {
                     </td>
                     <td className="px-4 py-2.5 text-center" onClick={e => e.stopPropagation()}>
                       <button
-                        onClick={() => navigate(`/finance/salaries/${t.id}?pay_period=${month}`)}
+                        onClick={() => goToTeacher(t.id)}
                         className="px-2.5 py-1 bg-brand hover:bg-brand-600 text-white rounded text-xs font-medium transition-colors"
                       >
                         Voir
