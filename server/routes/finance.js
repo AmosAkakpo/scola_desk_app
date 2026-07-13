@@ -36,13 +36,26 @@ function extractDeadlineMonth(val) {
 router.get('/subscription', (req, res) => {
   const db = getDb()
   const license = db.prepare('SELECT * FROM license_state LIMIT 1').get()
-  const actualStudents = db.prepare("SELECT COUNT(*) as cnt FROM students WHERE is_deleted = 0").get()?.cnt || 0
+
+  // Derive deadline date from current academic year's start year + stored month number
+  const ayId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
+
+  // Scoped to students actually enrolled THIS year, matching the finance
+  // dashboard (owner report 2026-07-13: this used to be a lifetime count
+  // of every student ever created, inflating the billing number forever
+  // as students graduated/were excluded across years).
+  const actualStudents = ayId
+    ? db.prepare(`
+        SELECT COUNT(*) as cnt FROM students s
+        JOIN enrollments e ON e.student_id = s.id AND e.academic_year_id = ? AND e.is_deleted = 0
+        WHERE s.is_deleted = 0
+      `).get(ayId)?.cnt || 0
+    : 0
+
   const settings = db.prepare("SELECT key, value FROM app_settings WHERE key IN ('semester_1_deadline', 'semester_2_deadline', 'semester_3_deadline')").all()
   const deadlines = {}
   settings.forEach(s => { deadlines[s.key] = s.value })
 
-  // Derive deadline date from current academic year's start year + stored month number
-  const ayId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
   const ayLabel = ayId ? (db.prepare('SELECT label FROM academic_years WHERE id = ?').get(ayId)?.label || '') : ''
   const startYear = ayLabel.split('-')[0]?.trim() || String(new Date().getFullYear())
   const month1 = extractDeadlineMonth(deadlines.semester_1_deadline)

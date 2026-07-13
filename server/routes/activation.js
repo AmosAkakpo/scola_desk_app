@@ -128,17 +128,28 @@ router.get('/status', (req, res) => {
   const featuresRaw = db.prepare("SELECT value FROM app_settings WHERE key = 'license_features'").get()?.value
   const features = featuresRaw ? JSON.parse(featuresRaw) : []
 
-  // Live student count
-  const actualStudents = db.prepare("SELECT COUNT(*) as cnt FROM students WHERE is_deleted = 0").get()?.cnt || 0
-
-  // After a cloud restore the school is configured but has zero users
-  // (users are never synced) — the boot flow needs to detect that state.
-  const userCount = db.prepare('SELECT COUNT(*) as cnt FROM users WHERE is_deleted = 0 AND is_active = 1').get()?.cnt || 0
-
   const currentYearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
   const academicYearLabel = currentYearId
     ? db.prepare('SELECT label FROM academic_years WHERE id = ?').get(currentYearId)?.label || null
     : null
+
+  // Live student count -- scoped to students actually enrolled THIS year,
+  // matching the dashboard (owner report 2026-07-13: subscription page
+  // showed 103, a lifetime count of every student ever created, vs the
+  // dashboard's 89 -- graduated/excluded/not-yet-reenrolled students were
+  // inflating the billing number forever). Same join shape as the finance
+  // dashboard's total_students so the two numbers can never diverge again.
+  const actualStudents = currentYearId
+    ? db.prepare(`
+        SELECT COUNT(*) as cnt FROM students s
+        JOIN enrollments e ON e.student_id = s.id AND e.academic_year_id = ? AND e.is_deleted = 0
+        WHERE s.is_deleted = 0
+      `).get(currentYearId)?.cnt || 0
+    : 0
+
+  // After a cloud restore the school is configured but has zero users
+  // (users are never synced) — the boot flow needs to detect that state.
+  const userCount = db.prepare('SELECT COUNT(*) as cnt FROM users WHERE is_deleted = 0 AND is_active = 1').get()?.cnt || 0
 
   return res.json({
     activated: true,
@@ -167,7 +178,14 @@ router.get('/status', (req, res) => {
 // ─── GET /api/activation/student-count ──────────────────────
 router.get('/student-count', (req, res) => {
   const db = getDb()
-  const count = db.prepare("SELECT COUNT(*) as cnt FROM students WHERE is_deleted = 0").get()?.cnt || 0
+  const currentYearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
+  const count = currentYearId
+    ? db.prepare(`
+        SELECT COUNT(*) as cnt FROM students s
+        JOIN enrollments e ON e.student_id = s.id AND e.academic_year_id = ? AND e.is_deleted = 0
+        WHERE s.is_deleted = 0
+      `).get(currentYearId)?.cnt || 0
+    : 0
   return res.json({ count })
 })
 

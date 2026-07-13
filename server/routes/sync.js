@@ -170,7 +170,18 @@ async function runSync(syncUid) {
       db.prepare('UPDATE sync_log SET checkpoint = ?, records_sent = ? WHERE sync_uid = ?').run(i + 1, recordsSent, syncUid)
     }
 
-    const studentCount = db.prepare("SELECT COUNT(*) as cnt FROM students WHERE is_deleted = 0").get().cnt
+    // Scoped to students actually enrolled THIS year, matching the finance
+    // pages (owner report 2026-07-13: this used to be a lifetime count of
+    // every student ever created, inflating the CAP billing number forever
+    // as students graduated/were excluded across years).
+    const currentYearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
+    const studentCount = currentYearId
+      ? db.prepare(`
+          SELECT COUNT(*) as cnt FROM students s
+          JOIN enrollments e ON e.student_id = s.id AND e.academic_year_id = ? AND e.is_deleted = 0
+          WHERE s.is_deleted = 0
+        `).get(currentYearId).cnt
+      : 0
 
     await postToCap({
       action: 'complete',
