@@ -276,6 +276,9 @@ export default function StudentDetailPage() {
         )}
       </section>
 
+      {/* Bulletins — printable history across ALL years, not just current */}
+      <BulletinHistorySection studentId={id} />
+
       {/* Sanctions & Décisions */}
       <section className="bg-white rounded-xl border border-steel-200 p-6">
         <div className="flex items-center justify-between mb-4">
@@ -651,5 +654,66 @@ function AddGuardianModal({ studentId, onClose, onDone }) {
         </form>
       </div>
     </div>
+  )
+}
+
+// ─── Bulletin history — every semester of every year, generated or not ──
+// Lazy: only fetched once the section is opened, since it's a secondary
+// view most visits to a student page won't need.
+function BulletinHistorySection({ studentId }) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [years, setYears] = useState(null)
+  const navigate = useNavigate()
+
+  function toggle() {
+    if (!open && years === null) {
+      setLoading(true)
+      api.get(`/api/students/${studentId}/bulletin-history`).then(res => {
+        setYears(res.data.years || [])
+        setLoading(false)
+      })
+    }
+    setOpen(o => !o)
+  }
+
+  return (
+    <section className="bg-white rounded-xl border border-steel-200 p-6">
+      <button onClick={toggle} className="flex items-center justify-between w-full">
+        <h2 className="text-xs font-semibold text-steel-400 uppercase tracking-wide">Bulletins</h2>
+        <span className="text-xs text-steel-400">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        loading ? (
+          <p className="text-sm text-steel-400 text-center py-4">Chargement...</p>
+        ) : years.length === 0 ? (
+          <p className="text-sm text-steel-400 text-center py-4">Aucune inscription trouvée.</p>
+        ) : (
+          <div className="mt-4 space-y-4">
+            {years.map(y => (
+              <div key={y.academic_year_id}>
+                <p className="text-sm font-medium text-steel-800 mb-2">{y.year_label} — {y.classroom_label}</p>
+                <div className="flex flex-wrap gap-2">
+                  {y.semesters.map(s => (
+                    <button key={s.semester}
+                      disabled={!s.snapshot_id}
+                      onClick={() => navigate(`/report-cards/${s.snapshot_id}`)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                        s.snapshot_id
+                          ? 'border-brand text-brand hover:bg-brand-50 cursor-pointer'
+                          : 'border-steel-200 text-steel-300 cursor-not-allowed'
+                      }`}>
+                      {s.semester === 1 ? '1er' : s.semester === 2 ? '2ème' : '3ème'} trimestre
+                      {!s.snapshot_id && <span className="block text-[10px] font-normal">Non généré</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+    </section>
   )
 }

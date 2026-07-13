@@ -144,6 +144,43 @@ router.get('/:id', requirePermission('students.view'), (req, res) => {
   })
 })
 
+// ─── GET /api/students/:id/bulletin-history — printable bulletins across ALL years ─
+// Lists every semester of every year the student was ever enrolled in
+// (not just years with an existing bulletin) so a school can always
+// explain "no bulletin was generated for this semester" rather than the
+// student simply not appearing. periode_count is a single global setting
+// (not per-year in this schema), so it's used uniformly across all years.
+router.get('/:id/bulletin-history', requirePermission('reports.view'), (req, res) => {
+  const db = getDb()
+  const periodeCount = parseInt(db.prepare("SELECT value FROM app_settings WHERE key = 'periode_count'").get()?.value || '3')
+
+  const enrollments = db.prepare(`
+    SELECT e.academic_year_id, ay.label AS year_label, e.classroom_id, c.label AS classroom_label
+    FROM enrollments e
+    JOIN academic_years ay ON ay.id = e.academic_year_id
+    JOIN classrooms c ON c.id = e.classroom_id
+    WHERE e.student_id = ? AND e.is_deleted = 0
+    ORDER BY ay.label DESC
+  `).all(req.params.id)
+
+  const snapshotStmt = db.prepare(`
+    SELECT id FROM report_card_snapshots
+    WHERE student_id = ? AND classroom_id = ? AND academic_year_id = ? AND semester = ?
+  `)
+
+  const years = enrollments.map(e => ({
+    academic_year_id: e.academic_year_id,
+    year_label: e.year_label,
+    classroom_label: e.classroom_label,
+    semesters: Array.from({ length: periodeCount }, (_, i) => i + 1).map(semester => ({
+      semester,
+      snapshot_id: snapshotStmt.get(req.params.id, e.classroom_id, e.academic_year_id, semester)?.id || null,
+    })),
+  }))
+
+  return res.json({ years })
+})
+
 // ─── PUT /api/students/:id — Update personal info ───────────
 router.put('/:id', requirePermission('students.edit'), (req, res) => {
   const db = getDb()
