@@ -67,15 +67,21 @@ export default function FinAnneePage() {
         <p className="text-sm text-steel-500 mt-1">Vérifications, promotion des élèves.</p>
       </div>
 
-      {/* Strict order: a step is only clickable once actually reached via
-          its "Continuer"/"Commencer" action, never skipped ahead to. */}
+      {/* Strict order for the working steps (checklist -> aperçu ->
+          exécution): only clickable once actually reached via
+          "Continuer"/"Commencer", never skipped ahead to. Historique
+          (always the last step) is the exception -- it's a read-only log +
+          rollback action, not part of that workflow, and maxStepReached is
+          session-scoped: after restarting the app post-execution it would
+          otherwise be impossible to reach the very screen that shows what
+          just happened and lets you roll it back. */}
       <div className="flex items-center gap-2 text-xs text-steel-500">
         {(EXAM_COHORT_ENABLED
           ? ['Vérifications', 'Résultats examens', 'Aperçu', 'Exécution', 'Historique']
           : ['Vérifications', 'Aperçu', 'Exécution', 'Historique']
-        ).map((label, i) => {
+        ).map((label, i, arr) => {
           const n = i + 1
-          const reachable = n <= maxStepReached
+          const reachable = n <= maxStepReached || n === arr.length
           return (
             <button key={label} onClick={() => reachable && setStep(n)} disabled={!reachable}
               className={`px-3 py-1.5 rounded-full transition-colors ${
