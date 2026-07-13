@@ -8,26 +8,55 @@ function formatXOF(n) {
   return new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' F'
 }
 
-function getMonthOptions() {
+// Months within [startDate, endDate] inclusive -- scoped to whichever
+// academic year is selected, so a payment can't be misfiled into a month
+// that doesn't actually belong to that year (owner report 2026-07-13: the
+// old version showed a fixed "today ± few months" window regardless of
+// which year was selected, letting May get recorded under 2026-2027 when
+// May actually belongs to 2025-2026).
+function getMonthOptions(startDate, endDate) {
+  if (!startDate || !endDate) return []
   const opts = []
-  const now = new Date()
-  for (let i = -3; i <= 1; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+  const d = new Date(startDate + 'T00:00:00')
+  const end = new Date(endDate + 'T00:00:00')
+  while (d <= end) {
     const val = d.toISOString().slice(0, 7)
     const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
     opts.push({ value: val, label: label.charAt(0).toUpperCase() + label.slice(1) })
+    d.setMonth(d.getMonth() + 1)
   }
   return opts
 }
 
 export default function SalariesPage() {
   const [data, setData] = useState(null)
+  const [years, setYears] = useState([])
   const [loading, setLoading] = useState(true)
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [month, setMonth] = useState('')
   const [yearId, setYearId] = useState(null) // null = current year
   const navigate = useNavigate()
 
+  useEffect(() => {
+    api.get('/api/finance/academic-years').then(res => setYears(res.data.years || []))
+  }, [])
+
+  const selectedYear = years.find(y => yearId ? y.id === parseInt(yearId) : y.is_active)
+  const monthOptions = getMonthOptions(selectedYear?.start_date, selectedYear?.end_date)
+
+  // Default/reset the month to the most recent one in range whenever the
+  // selected year (or the available options) changes.
+  useEffect(() => {
+    if (monthOptions.length === 0) return
+    if (!monthOptions.some(o => o.value === month)) {
+      const todayMonth = new Date().toISOString().slice(0, 7)
+      const inRange = monthOptions.find(o => o.value === todayMonth)
+      setMonth(inRange ? todayMonth : monthOptions[monthOptions.length - 1].value)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYear?.id])
+
   const load = useCallback(() => {
+    if (!month) return
     setLoading(true)
     api.get('/api/finance/salaries', { params: { pay_period: month, ...(yearId ? { academic_year_id: yearId } : {}) } }).then(res => {
       setData(res.data)
@@ -61,7 +90,7 @@ export default function SalariesPage() {
       <div className="flex gap-3 mb-4">
         <select value={month} onChange={e => setMonth(e.target.value)}
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
-          {getMonthOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         {yearId && <span className="px-3 py-2 bg-amber-50 text-amber-600 rounded-lg text-xs font-medium">Année archivée — lecture seule</span>}
       </div>

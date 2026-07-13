@@ -7,14 +7,19 @@ function formatXOF(n) {
   return new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' F'
 }
 
-function getMonthOptions() {
+// Months within [startDate, endDate] inclusive -- same fix as SalariesPage's
+// getMonthOptions, so a payment can't be recorded under a month that
+// doesn't actually belong to the selected academic year.
+function getMonthOptions(startDate, endDate) {
+  if (!startDate || !endDate) return []
   const opts = []
-  const now = new Date()
-  for (let i = -5; i <= 1; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+  const d = new Date(startDate + 'T00:00:00')
+  const end = new Date(endDate + 'T00:00:00')
+  while (d <= end) {
     const val = d.toISOString().slice(0, 7)
     const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
     opts.push({ value: val, label: label.charAt(0).toUpperCase() + label.slice(1) })
+    d.setMonth(d.getMonth() + 1)
   }
   return opts
 }
@@ -37,6 +42,7 @@ export default function TeacherSalaryPage() {
   // Carried over from the list page when viewing a past (archived) year —
   // read-only there, no payment form.
   const archivedYearId = searchParams.get('academic_year_id') || null
+  const [years, setYears] = useState([])
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -81,6 +87,13 @@ export default function TeacherSalaryPage() {
     setAdjustmentReason('')
     load()
   }, [teacherId, month])
+
+  useEffect(() => {
+    api.get('/api/finance/academic-years').then(res => setYears(res.data.years || []))
+  }, [])
+
+  const selectedYear = years.find(y => archivedYearId ? y.id === parseInt(archivedYearId) : y.is_active)
+  const monthOptions = getMonthOptions(selectedYear?.start_date, selectedYear?.end_date)
 
   // Calculated remaining for the month — drives pre-fill + adjustment reason requirement
   const expectedAmount = data ? Math.max(0, (data.calculated_amount || 0) - (data.total_paid || 0)) : 0
@@ -147,7 +160,7 @@ export default function TeacherSalaryPage() {
         </button>
         <select value={month} onChange={e => setMonth(e.target.value)}
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
-          {getMonthOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
 

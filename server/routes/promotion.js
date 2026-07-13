@@ -260,12 +260,25 @@ router.post('/execute/:academicYearId', (req, res) => {
 
   const periodeCount = parseInt(db.prepare("SELECT value FROM app_settings WHERE key = 'periode_count'").get()?.value || '3')
 
+  // Fixed convention (owner-set 2026-07-13): an academic year always runs
+  // Aug 1 -> Jul 31, "less headaches" than trying to infer it from
+  // whatever dates the previous year happened to have. Derived from the
+  // label when it matches YYYY-YYYY (the normal case -- Étape 4 always
+  // pre-fills this format); falls back to today -> +11 months for a
+  // custom label that doesn't parse, so date-scoped features (like the
+  // salary month picker) still get *something* sane instead of nulls.
+  const labelMatch = /^(\d{4})-(\d{4})$/.exec(new_year_label.trim())
+  const newStartDate = labelMatch ? `${labelMatch[1]}-08-01` : new Date().toISOString().slice(0, 10)
+  const newEndDate = labelMatch
+    ? `${labelMatch[2]}-07-31`
+    : new Date(Date.now() + 335 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
   try {
     const promotionUid = db.transaction(() => {
       // 1. New academic year, becomes the active one.
       const yearResult = db.prepare(
-        'INSERT INTO academic_years (label, is_active) VALUES (?, 1)'
-      ).run(new_year_label.trim())
+        'INSERT INTO academic_years (label, start_date, end_date, is_active) VALUES (?, ?, ?, 1)'
+      ).run(new_year_label.trim(), newStartDate, newEndDate)
       const newYearId = yearResult.lastInsertRowid
 
       db.prepare('UPDATE academic_years SET is_active = 0 WHERE id != ?').run(newYearId)

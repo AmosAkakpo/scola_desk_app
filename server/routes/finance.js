@@ -91,7 +91,7 @@ function generateReceiptNumber(db, yearId, prefix) {
 // ─── ACADEMIC YEARS (for the year-switcher dropdown) ───────
 router.get('/academic-years', requirePermission('finance.view'), (req, res) => {
   const db = getDb()
-  const years = db.prepare('SELECT id, label, is_active FROM academic_years ORDER BY label DESC').all()
+  const years = db.prepare('SELECT id, label, is_active, start_date, end_date FROM academic_years ORDER BY label DESC').all()
   return res.json({ years })
 })
 
