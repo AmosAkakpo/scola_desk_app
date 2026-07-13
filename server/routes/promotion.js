@@ -234,6 +234,13 @@ router.post('/execute/:academicYearId', (req, res) => {
   const oldYearId = parseInt(req.params.academicYearId)
   const { overrides, carry_forward_assignments, new_year_label, confirm_text } = req.body || {}
 
+  // Promotion only runs June onward each year (owner-set 2026-07-13) --
+  // blocks an accidental mid-year run; reopens automatically every June.
+  const currentMonth = new Date().getMonth() + 1 // 1-12
+  if (currentMonth < 6) {
+    return res.status(400).json({ error: 'PROMOTION_LOCKED', message: "La promotion de fin d'année ne peut être exécutée qu'à partir de juin" })
+  }
+
   if (confirm_text !== 'PROMOTION') {
     return res.status(400).json({ error: 'CONFIRM_REQUIRED', message: 'Confirmation requise' })
   }
@@ -415,7 +422,21 @@ router.get('/runs', (req, res) => {
   return res.json({ runs })
 })
 
-// ─── POST /api/promotion/rollback/:promotionUid — Étape 5, 30-day window ──
+// 14 days, hard cutoff (owner-set 2026-07-13): the new year is meant to be
+// genuinely provisional for exactly this long. After it expires, rollback
+// is permanently locked for that run -- not extendable, no override.
+const ROLLBACK_WINDOW_DAYS = 14
+
+// ─── POST /api/promotion/rollback/:promotionUid — full wipe of the new year ─
+// Unlike the original design, this does NOT refuse when the new year has
+// activity (payments/scores/bulletins) -- it deletes ALL of it. Within the
+// 14-day window nothing in the new year is meant to be considered final;
+// a partial rollback (enrollments only) left orphaned classrooms/fee_types/
+// grade computations behind that then blocked retrying the promotion with
+// the same year label (owner-reported 2026-07-13) -- this replaces that
+// with an unconditional, complete purge of the new academic year and
+// everything scoped to it, including the promotion_runs/details rows
+// themselves, so a retry starts from a genuinely clean slate.
 router.post('/rollback/:promotionUid', (req, res) => {
   const db = getDb()
   const run = db.prepare('SELECT * FROM promotion_runs WHERE promotion_uid = ?').get(req.params.promotionUid)
@@ -424,68 +445,59 @@ router.post('/rollback/:promotionUid', (req, res) => {
   if (run.is_rolled_back) return res.status(409).json({ error: 'ALREADY_ROLLED_BACK', message: 'Cette promotion a déjà été annulée' })
 
   const daysSince = (Date.now() - new Date(run.executed_at).getTime()) / (24 * 60 * 60 * 1000)
-  if (daysSince > 30) {
-    return res.status(403).json({ error: 'WINDOW_EXPIRED', message: "Délai d'annulation de 30 jours dépassé" })
+  if (daysSince > ROLLBACK_WINDOW_DAYS) {
+    return res.status(403).json({ error: 'WINDOW_EXPIRED', message: "Délai d'annulation de 14 jours dépassé — cette promotion ne peut plus être annulée" })
   }
 
-  const details = db.prepare('SELECT * FROM promotion_details WHERE promotion_run_id = ?').all(run.id)
   const newYearId = run.academic_year_to
-
-  // Refuse if any promoted student already has real activity in the new
-  // year -- rolling back would silently orphan payments/grades rather than
-  // cleanly undoing the promotion.
-  const blocked = []
-  for (const d of details) {
-    if (!d.new_classroom_id) continue
-    const hasPayments = db.prepare('SELECT 1 FROM payments WHERE student_id = ? AND academic_year_id = ? LIMIT 1').get(d.student_id, newYearId)
-    const hasScores = db.prepare(`
-      SELECT 1 FROM assessment_scores sc
-      JOIN assessment_templates t ON t.id = sc.template_id
-      WHERE sc.student_id = ? AND t.academic_year_id = ? AND sc.is_deleted = 0 LIMIT 1
-    `).get(d.student_id, newYearId)
-    const hasReportCards = db.prepare('SELECT 1 FROM report_card_snapshots WHERE student_id = ? AND academic_year_id = ? LIMIT 1').get(d.student_id, newYearId)
-    if (hasPayments || hasScores || hasReportCards) {
-      const student = db.prepare('SELECT full_name FROM students WHERE id = ?').get(d.student_id)
-      blocked.push(student?.full_name || `#${d.student_id}`)
-    }
-  }
-  if (blocked.length > 0) {
-    return res.status(409).json({
-      error: 'ACTIVITY_EXISTS',
-      message: "Annulation impossible : des données ont déjà été enregistrées pour l'année suivante pour ces élèves",
-      students: blocked,
-    })
-  }
+  const oldYearId = run.academic_year_from
 
   try {
     db.transaction(() => {
+      // Revert every student's status/is_redoublant before the records
+      // describing what happened to them (promotion_details) are wiped.
+      const details = db.prepare('SELECT student_id, verdict, new_classroom_id FROM promotion_details WHERE promotion_run_id = ?').all(run.id)
       for (const d of details) {
-        if (d.new_classroom_id) {
-          db.prepare('DELETE FROM enrollments WHERE student_id = ? AND classroom_id = ? AND academic_year_id = ?')
-            .run(d.student_id, d.new_classroom_id, newYearId)
+        if (d.verdict === 'exclu' || !d.new_classroom_id) {
+          // exclu override or graduated (no new enrollment either way) -> active again
+          db.prepare("UPDATE students SET status = 'active', is_redoublant = 0, updated_at = datetime('now') WHERE id = ?").run(d.student_id)
+        } else {
           db.prepare("UPDATE students SET is_redoublant = 0, updated_at = datetime('now') WHERE id = ?").run(d.student_id)
-        }
-        if (d.verdict === 'exclu') {
-          db.prepare("UPDATE students SET status = 'active', updated_at = datetime('now') WHERE id = ?").run(d.student_id)
-        } else if (!d.new_classroom_id) {
-          // graduated
-          db.prepare("UPDATE students SET status = 'active', updated_at = datetime('now') WHERE id = ?").run(d.student_id)
         }
       }
 
-      // Revert active year + current_academic_year_id back to the old one.
-      // The new year's classrooms/fee_types/etc. are left in place -- only
-      // the promotion's enrollment effects are reversed.
-      db.prepare('UPDATE academic_years SET is_active = 0 WHERE id = ?').run(newYearId)
-      db.prepare('UPDATE academic_years SET is_active = 1 WHERE id = ?').run(run.academic_year_from)
-      db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('current_academic_year_id', ?, datetime('now'))")
-        .run(String(run.academic_year_from))
+      // Full purge, FK-safe order (children before parents).
+      db.prepare('DELETE FROM promotion_details WHERE promotion_run_id = ?').run(run.id)
+      db.prepare('DELETE FROM assessment_scores WHERE template_id IN (SELECT id FROM assessment_templates WHERE academic_year_id = ?)').run(newYearId)
+      db.prepare('DELETE FROM subject_averages WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM semester_summaries WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM semester_decisions WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM report_card_snapshots WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM national_exam_results WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM assessment_templates WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM payment_allocations WHERE payment_id IN (SELECT id FROM payments WHERE academic_year_id = ?)').run(newYearId)
+      db.prepare('DELETE FROM payments WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM student_fee_selections WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM fee_type_amounts WHERE fee_type_id IN (SELECT id FROM fee_types WHERE academic_year_id = ?)').run(newYearId)
+      db.prepare('DELETE FROM fee_types WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM salary_payments WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM salary_entries WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM expenses WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM other_revenues WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM ledger_transactions WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM teacher_schedule WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM classroom_teachers WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM timetable_entries WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM teacher_daily_log WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM enrollments WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM classrooms WHERE academic_year_id = ?').run(newYearId)
+      db.prepare('DELETE FROM promotion_runs WHERE id = ?').run(run.id)
+      db.prepare('DELETE FROM academic_years WHERE id = ?').run(newYearId)
 
-      db.prepare(`
-        UPDATE promotion_runs
-        SET is_rolled_back = 1, rolled_back_at = datetime('now'), rolled_back_by = ?
-        WHERE id = ?
-      `).run(req.user.id, run.id)
+      // Old year becomes active again.
+      db.prepare('UPDATE academic_years SET is_active = 1 WHERE id = ?').run(oldYearId)
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('current_academic_year_id', ?, datetime('now'))")
+        .run(String(oldYearId))
     })()
 
     return res.json({ success: true })

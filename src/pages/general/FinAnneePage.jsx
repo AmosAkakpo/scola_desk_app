@@ -242,7 +242,7 @@ function Etape1Checklist({ onNext }) {
       {showConfirm && (
         <ConfirmModal
           title="Terminer l'année scolaire ?"
-          message="Cette action lance le processus de fin d'année. Vous pourrez encore annuler après l'exécution finale (fenêtre de 30 jours)."
+          message="Cette action lance le processus de fin d'année. Vous pourrez encore annuler après l'exécution finale, mais seulement pendant 14 jours."
           confirmLabel="Oui, continuer"
           onCancel={() => setShowConfirm(false)}
           onConfirm={() => { setShowConfirm(false); onNext() }}
@@ -651,7 +651,7 @@ function Etape4Execute({ yearId, yearLabel, overrides, previewSummary, onDone, o
       {showConfirm && (
         <ConfirmModal
           title="Confirmer la promotion"
-          message="Cette action crée la nouvelle année académique et réinscrit les élèves. Une annulation reste possible pendant 30 jours."
+          message="Cette action crée la nouvelle année académique et réinscrit les élèves. Une annulation complète reste possible pendant 14 jours seulement — passé ce délai, ce sera définitif."
           requireMatch="PROMOTION"
           matchLabel="mot"
           danger
@@ -690,12 +690,11 @@ function Etape5History() {
       load()
     } catch (err) {
       setError(err.response?.data?.message || err.friendlyMessage || 'Erreur')
-      if (err.response?.data?.students) setError(prev => `${prev} : ${err.response.data.students.join(', ')}`)
     }
     setRollingBack(false)
   }
 
-  const withinWindow = run => (Date.now() - new Date(run.executed_at).getTime()) < 30 * 24 * 60 * 60 * 1000
+  const withinWindow = run => (Date.now() - new Date(run.executed_at).getTime()) < 14 * 24 * 60 * 60 * 1000
 
   if (loading) return <div className="bg-white rounded-xl border border-steel-200 p-6"><p className="text-sm text-steel-400">Chargement...</p></div>
 
@@ -723,7 +722,7 @@ function Etape5History() {
       {rollbackTarget && (
         <ConfirmModal
           title="Annuler cette promotion ?"
-          message="Les inscriptions créées par cette promotion seront supprimées. L'année académique précédente redevient active."
+          message="La nouvelle année académique sera entièrement supprimée (classes, inscriptions, notes, paiements, tout ce qui y a été ajouté). L'année académique précédente redevient active. Cette action est irréversible."
           danger
           confirmLabel="Annuler la promotion"
           saving={rollingBack}
