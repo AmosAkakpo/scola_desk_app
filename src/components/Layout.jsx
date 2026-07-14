@@ -44,6 +44,44 @@ function PromotionBanner({ endDate }) {
   )
 }
 
+const LICENSE_BANNER_DAYS = 14
+
+// Advance warning before the license actually expires -- once it has
+// actually expired, the persistent red read-only banner (below, in the
+// main Layout render) already covers it, so this one only shows in the
+// countdown window and never after. Dismissible, keyed to the expiry date
+// itself so renewing resets it.
+function LicenseExpiryBanner({ expiry }) {
+  const [dismissed, setDismissed] = useState(false)
+  const storageKey = `scola_license_banner_dismissed_${expiry}`
+
+  useEffect(() => {
+    if (expiry && sessionStorage.getItem(storageKey)) setDismissed(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expiry])
+
+  if (!expiry || dismissed) return null
+
+  const end = new Date(expiry + 'T00:00:00')
+  const daysLeft = Math.ceil((end.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+  if (daysLeft > LICENSE_BANNER_DAYS || daysLeft <= 0) return null
+
+  function dismiss() {
+    sessionStorage.setItem(storageKey, '1')
+    setDismissed(true)
+  }
+
+  return (
+    <div className="flex items-center justify-between px-4 py-2 text-sm shrink-0 bg-amber-50 text-amber-700 border-b border-amber-200">
+      <span>
+        Votre licence expire dans {daysLeft} jour{daysLeft > 1 ? 's' : ''} (le {end.toLocaleDateString('fr-FR')}) — pensez à renouveler.
+        {' '}<Link to="/settings/license" className="font-medium hover:underline">Renouveler →</Link>
+      </span>
+      <button onClick={dismiss} className="ml-3 shrink-0 text-amber-500 hover:text-amber-700">✕</button>
+    </div>
+  )
+}
+
 // Access matrix (admin sees everything, within the license tier):
 //   - Gestion académique  → admin + secretary
 //   - Finance             → admin + accountant, PRO tier only
@@ -303,6 +341,9 @@ export default function Layout({ schoolInfo }) {
             )}
           </div>
         )}
+
+        {/* License-expiry advance warning, admin-only, dismissible */}
+        {user?.role === 'admin' && <LicenseExpiryBanner expiry={schoolInfo?.expiry} />}
 
         {/* Promotion countdown/redirect banner, admin-only, dismissible */}
         {user?.role === 'admin' && <PromotionBanner endDate={schoolInfo?.academic_year_end_date} />}
