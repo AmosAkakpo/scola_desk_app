@@ -2,6 +2,7 @@ const { app, BrowserWindow, shell } = require('electron')
 const path = require('path')
 const { fork } = require('child_process')
 const { registerHardwareIPC } = require('./ipc/hardware')
+const { getOrCreateDbKey, storeDbKey } = require('./dbKey')
 
 const isDev = !app.isPackaged
 
@@ -13,13 +14,26 @@ function startExpressServer() {
         ? path.join(__dirname, '../server/index.js')
         : path.join(process.resourcesPath, 'server/index.js')
 
+    // Key custody lives here (safeStorage is main-process only — the
+    // server is a forked child); the plaintext key rides down via env.
+    const dbKey = getOrCreateDbKey()
+
     serverProcess = fork(serverPath, [], {
         env: {
             ...process.env,
             PORT: '3000',
             NODE_ENV: isDev ? 'development' : 'production',
+            SCOLA_DB_KEY: dbKey,
         },
-        stdio: 'pipe',
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+    })
+
+    // Activation rekeys the DB to the school's official CAP-escrowed key —
+    // the server can't persist it (no safeStorage there), so it sends it up.
+    serverProcess.on('message', (m) => {
+        if (m && m.type === 'store-db-key' && typeof m.key === 'string' && m.key) {
+            try { storeDbKey(m.key) } catch (err) { console.error('[DB KEY]', err) }
+        }
     })
 
     serverProcess.stdout?.on('data', (d) =>
