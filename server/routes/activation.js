@@ -129,9 +129,13 @@ router.get('/status', (req, res) => {
   const features = featuresRaw ? JSON.parse(featuresRaw) : []
 
   const currentYearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
-  const academicYearLabel = currentYearId
-    ? db.prepare('SELECT label FROM academic_years WHERE id = ?').get(currentYearId)?.label || null
+  const currentYearRow = currentYearId
+    ? db.prepare('SELECT label, end_date FROM academic_years WHERE id = ?').get(currentYearId)
     : null
+  const academicYearLabel = currentYearRow?.label || null
+  // For the Étape 1 countdown/redirect banner (owner-set 2026-07-13):
+  // promotion opens once this date has passed.
+  const academicYearEndDate = currentYearRow?.end_date || null
 
   // Live student count -- scoped to students actually enrolled THIS year,
   // matching the dashboard (owner report 2026-07-13: subscription page
@@ -154,6 +158,7 @@ router.get('/status', (req, res) => {
   return res.json({
     activated: true,
     academic_year_label: academicYearLabel,
+    academic_year_end_date: academicYearEndDate,
     configured: config?.is_configured === 1,
     has_users: userCount > 0,
     license_status: licenseStatus,

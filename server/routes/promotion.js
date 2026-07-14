@@ -234,11 +234,18 @@ router.post('/execute/:academicYearId', (req, res) => {
   const oldYearId = parseInt(req.params.academicYearId)
   const { overrides, carry_forward_assignments, new_year_label, confirm_text } = req.body || {}
 
-  // Promotion only runs June onward each year (owner-set 2026-07-13) --
-  // blocks an accidental mid-year run; reopens automatically every June.
-  const currentMonth = new Date().getMonth() + 1 // 1-12
-  if (currentMonth < 6) {
-    return res.status(400).json({ error: 'PROMOTION_LOCKED', message: "La promotion de fin d'année ne peut être exécutée qu'à partir de juin" })
+  // Promotion only opens once the CURRENT year's end_date has passed
+  // (owner-set 2026-07-13, revised from an earlier flat "June onward" rule
+  // to line up with the Aug 1 -> Jul 31 year convention and the Étape 1
+  // countdown banner, which promises "available in N days" counting down
+  // to exactly this date). Reopens automatically once a year's end_date
+  // is in the past -- no manual toggle needed.
+  const currentYear = db.prepare('SELECT end_date FROM academic_years WHERE id = ?').get(oldYearId)
+  if (currentYear?.end_date && new Date() <= new Date(currentYear.end_date)) {
+    return res.status(400).json({
+      error: 'PROMOTION_LOCKED',
+      message: `La promotion de fin d'année ne peut être exécutée qu'après le ${new Date(currentYear.end_date).toLocaleDateString('fr-FR')}`,
+    })
   }
 
   if (confirm_text !== 'PROMOTION') {

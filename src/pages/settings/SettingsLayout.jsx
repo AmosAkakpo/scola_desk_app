@@ -6,6 +6,7 @@ const SUB_NAV = [
   { to: '/settings', label: 'École', end: true },
   { to: '/settings/bulletins', label: 'Notes & bulletins' },
   { to: '/settings/structure', label: 'Structure académique' },
+  { to: '/settings/license', label: 'Licence' },
 ]
 
 export default function SettingsLayout() {

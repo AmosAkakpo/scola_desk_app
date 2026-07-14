@@ -34,28 +34,13 @@ import SettingsLayout from './pages/settings/SettingsLayout'
 import SchoolSettingsPage from './pages/settings/SchoolSettingsPage'
 import BulletinSettingsPage from './pages/settings/BulletinSettingsPage'
 import StructureSettingsPage from './pages/settings/StructureSettingsPage'
+import LicenseSettingsPage from './pages/settings/LicenseSettingsPage'
 import SyncPage from './pages/settings/SyncPage'
 import UsersPage from './pages/settings/UsersPage'
 import FinAnneePage from './pages/general/FinAnneePage'
 import api from './utils/api'
 import './App.css'
 
-function ExpiredScreen({ schoolName, expiry }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-steel-900">
-      <div className="w-full max-w-sm p-8 text-center">
-        <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-        <h1 className="text-xl font-medium text-steel-200 mb-2">Licence expirée</h1>
-        <p className="text-sm text-steel-400 mb-4">{schoolName || 'ScolaDesk'}</p>
-        <p className="text-sm text-steel-500">Votre licence a expiré le {expiry ? new Date(expiry).toLocaleDateString('fr-FR') : '—'}. Contactez ScolaDesk pour renouveler.</p>
-      </div>
-    </div>
-  )
-}
 
 function SuspendedScreen({ schoolName }) {
   return (
@@ -139,6 +124,7 @@ function ProtectedApp({ schoolInfo }) {
             <Route index element={<SchoolSettingsPage />} />
             <Route path="bulletins" element={<BulletinSettingsPage />} />
             <Route path="structure" element={<StructureSettingsPage />} />
+            <Route path="license" element={<LicenseSettingsPage />} />
           </Route>
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/users" element={<UsersPage />} />
@@ -163,8 +149,11 @@ function AppContent() {
 
       if (!activated) { setAppState('activation'); return }
       if (license_status === 'tampered') { setAppState('tampered'); return }
-      if (license_status === 'expired') { setAppState('expired'); return }
       if (license_status === 'suspended') { setAppState('suspended'); return }
+      // Expired is NOT a hard block (owner request 2026-07-13) -- the app
+      // stays reachable read-only (viewing/downloading), writes are
+      // rejected server-side by requireActiveLicense. Layout shows a
+      // persistent banner + a Paramètres > Licence page to re-activate.
 
       // Post-restore state: data is back but users are never synced
       if (configured && !has_users) { setAppState('create-admin'); return }
@@ -193,7 +182,6 @@ function AppContent() {
   if (appState === 'loading') return <LoadingScreen />
   if (appState === 'activation') return <ActivationPage onActivated={() => { setAppState('loading'); checkStatus() }} />
   if (appState === 'tampered') return <TamperedScreen />
-  if (appState === 'expired') return <ExpiredScreen schoolName={schoolInfo?.school_name} expiry={schoolInfo?.expiry} />
   if (appState === 'suspended') return <SuspendedScreen schoolName={schoolInfo?.school_name} />
   if (appState === 'restore') return (
     <RestorePage info={restoreInfo}

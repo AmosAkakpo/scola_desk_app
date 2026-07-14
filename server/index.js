@@ -26,6 +26,13 @@ app.get('/api/health', (req, res) => {
 // Routes
 app.use('/api/auth', require('./routes/auth'))
 app.use('/api/activation', require('./routes/activation'))
+
+// Everything below this point is write-blocked school-wide once the
+// license has expired -- /auth (login/logout) and /activation
+// (status + reactivation) must always stay reachable, everything else
+// doesn't need individual exceptions since GETs are never touched anyway.
+app.use(require('./middleware/requireActiveLicense').requireActiveLicense)
+
 app.use('/api/onboarding', require('./routes/onboarding'))
 app.use('/api/students', require('./routes/students'))
 app.use('/api/classrooms', require('./routes/classrooms'))

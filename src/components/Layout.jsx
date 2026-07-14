@@ -1,7 +1,48 @@
 import { useState, useEffect } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Link, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import api from '../utils/api.js'
+
+const PROMO_BANNER_DAYS = 14
+
+// Dismissible per year (owner request 2026-07-13): keyed by the year's own
+// end_date, so dismissing it this year doesn't suppress it again next year
+// -- a fresh end_date is a fresh "x" to click.
+function PromotionBanner({ endDate }) {
+  const [dismissed, setDismissed] = useState(false)
+  const storageKey = `scola_promo_banner_dismissed_${endDate}`
+
+  useEffect(() => {
+    if (endDate && sessionStorage.getItem(storageKey)) setDismissed(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endDate])
+
+  if (!endDate || dismissed) return null
+
+  const end = new Date(endDate + 'T00:00:00')
+  const daysLeft = Math.ceil((end.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+  if (daysLeft > PROMO_BANNER_DAYS) return null
+
+  function dismiss() {
+    sessionStorage.setItem(storageKey, '1')
+    setDismissed(true)
+  }
+
+  const ready = daysLeft <= 0
+
+  return (
+    <div className={`flex items-center justify-between px-4 py-2 text-sm shrink-0 ${ready ? 'bg-brand text-white' : 'bg-amber-50 text-amber-700 border-b border-amber-200'}`}>
+      {ready ? (
+        <Link to="/fin-annee" className="font-medium hover:underline">
+          La promotion de fin d'année est disponible — cliquez ici pour commencer →
+        </Link>
+      ) : (
+        <span>La promotion de fin d'année sera disponible dans {daysLeft} jour{daysLeft > 1 ? 's' : ''}.</span>
+      )}
+      <button onClick={dismiss} className={`ml-3 shrink-0 ${ready ? 'text-white/80 hover:text-white' : 'text-amber-500 hover:text-amber-700'}`}>✕</button>
+    </div>
+  )
+}
 
 // Access matrix (admin sees everything, within the license tier):
 //   - Gestion académique  → admin + secretary
@@ -253,6 +294,19 @@ export default function Layout({ schoolInfo }) {
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Read-only banner — persistent, no dismiss, license genuinely expired */}
+        {schoolInfo?.license_status === 'expired' && (
+          <div className="flex items-center justify-between px-4 py-2 bg-red-600 text-white text-sm shrink-0">
+            <span className="font-medium">Licence expirée — mode lecture seule. Les ajouts et modifications sont désactivés.</span>
+            {user?.role === 'admin' && (
+              <Link to="/settings/license" className="underline hover:no-underline shrink-0 ml-3">Renouveler →</Link>
+            )}
+          </div>
+        )}
+
+        {/* Promotion countdown/redirect banner, admin-only, dismissible */}
+        {user?.role === 'admin' && <PromotionBanner endDate={schoolInfo?.academic_year_end_date} />}
+
         {/* Top bar */}
         <header className="h-12 bg-white border-b border-steel-200 flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
