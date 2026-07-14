@@ -1,6 +1,6 @@
 const fs = require('fs')
 const path = require('path')
-const Database = require('better-sqlite3')
+const Database = require('better-sqlite3-multiple-ciphers')
 const { generateUUID } = require('./uid')
 
 const MARKER_FILE = '.scoladesk_backup'

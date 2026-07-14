@@ -2,7 +2,7 @@
 // Run: node server/db/seed_timetable.js
 // Clears and rebuilds teacher_schedule + timetable_entries for the current academic year.
 
-const Database = require('better-sqlite3')
+const Database = require('better-sqlite3-multiple-ciphers')
 const path = require('path')
 
 const DB_PATH = path.join(__dirname, '../../data/scolaDesk.db')

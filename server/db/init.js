@@ -1,4 +1,7 @@
-const Database = require('better-sqlite3')
+// SQLCipher-capable fork, drop-in API-compatible with better-sqlite3 at
+// the same version. Reads plain (unencrypted) SQLite files identically
+// until a PRAGMA key is issued -- the swap itself changes no behavior.
+const Database = require('better-sqlite3-multiple-ciphers')
 const path = require('path')
 const fs = require('fs')
 

@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build": "npm run build && electron-builder",
-    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "rebuild": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
     "db:init": "cross-env NODE_ENV=development ELECTRON_ENABLE_LOGGING=1 electron ./server/db/run.js"
   },
   "build": {
@@ -48,7 +48,7 @@
   "dependencies": {
     "axios": "^1.18.0",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3-multiple-ciphers": "^12.11.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
