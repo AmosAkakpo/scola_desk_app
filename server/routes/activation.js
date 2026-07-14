@@ -7,6 +7,32 @@ const { getDb } = require('../db/init')
 const CAP_URL = (process.env.CAP_API_URL || 'http://localhost:3001').trim()
 const PAYLOAD_SECRET = (process.env.LICENSE_PAYLOAD_SECRET || 'scoladesk-v1-secret-change-in-production').trim()
 
+// Switches the live DB from whatever key it's currently using (the
+// bootstrap key generated at very first boot, per electron/dbKey.js) to
+// the school's official CAP-escrowed key. Non-fatal on failure: the
+// activation itself already succeeded server-side by this point, and the
+// local key just stays on its current value until the next activation
+// retries this. safeStorage lives in the Electron MAIN process only, so
+// persisting the new key is delegated via the fork's IPC channel rather
+// than done here.
+function rekeyIfNeeded(db, newKey) {
+  if (!newKey || newKey === process.env.SCOLA_DB_KEY) return
+  try {
+    // SQLite3MultipleCiphers can't rekey a WAL-mode database.
+    db.pragma('wal_checkpoint(TRUNCATE)')
+    db.pragma('journal_mode = DELETE')
+    db.pragma(`rekey='${newKey}'`)
+    db.pragma('journal_mode = WAL')
+    process.env.SCOLA_DB_KEY = newKey
+    if (typeof process.send === 'function') {
+      process.send({ type: 'store-db-key', key: newKey })
+    }
+    console.log('[DB KEY] Rekeyed to the school\'s official license key.')
+  } catch (err) {
+    console.error('[DB KEY] Rekey failed — staying on the current key:', err.message)
+  }
+}
+
 function verifySignature(payload) {
   const copy = { ...payload }
   delete copy.signature
@@ -239,6 +265,7 @@ router.post('/activate', async (req, res) => {
     // Store locally
     const db = getDb()
     storeLicenseLocally(db, payload, fingerprint)
+    rekeyIfNeeded(db, payload.db_encryption_key)
 
     return res.json({
       success: true,
