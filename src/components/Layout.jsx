@@ -205,6 +205,96 @@ function NetworkPanel() {
   )
 }
 
+// Status dot: green if backed up today/yesterday, orange 2-3 days stale,
+// red beyond that or never backed up (owner spec: "orange/red if stale
+// >3 days").
+function backupStatusColor(daysStale) {
+  if (daysStale === null || daysStale > 3) return 'bg-red-500'
+  if (daysStale >= 2) return 'bg-amber-500'
+  return 'bg-brand'
+}
+
+function BackupPanel() {
+  const [open, setOpen] = useState(false)
+  const [status, setStatus] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+
+  function load() {
+    api.get('/api/backup/status').then(res => setStatus(res.data)).catch(() => {})
+  }
+
+  useEffect(() => { load() }, [])
+
+  function toggle() {
+    if (!open) load()
+    setOpen(!open)
+  }
+
+  async function runNow() {
+    setRunning(true)
+    setError('')
+    try {
+      await api.post('/api/backup/run')
+      load()
+    } catch (err) {
+      setError(err.response?.data?.message || err.friendlyMessage || 'Erreur')
+    }
+    setRunning(false)
+  }
+
+  const dotColor = backupStatusColor(status?.days_stale)
+
+  return (
+    <div className="relative">
+      <button onClick={toggle} title="Sauvegarde USB"
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors text-xs ${
+          open ? 'text-brand bg-brand-50' : 'text-steel-400 hover:text-steel-700 hover:bg-steel-100'
+        }`}>
+        <span className={`w-2 h-2 rounded-full ${dotColor}`} />
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 01-2-2V4a2 2 0 012-2h14a2 2 0 012 2v2a2 2 0 01-2 2M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+        </svg>
+        Sauvegarde USB
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-9 bg-white border border-steel-200 rounded-xl shadow-lg z-30 w-80 p-4">
+            <p className="text-xs font-semibold text-steel-700 mb-1">Sauvegarde sur clé USB</p>
+            {!status ? (
+              <p className="text-xs text-steel-400 py-2">Chargement...</p>
+            ) : (
+              <div className="space-y-2 mb-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-steel-500">Dernière sauvegarde</span>
+                  <span className="font-medium text-steel-800">
+                    {status.last_backup_at ? new Date(status.last_backup_at).toLocaleString('fr-FR') : 'Jamais'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-steel-500">Clé USB détectée</span>
+                  <span className={`font-medium ${status.drive_detected ? 'text-brand' : 'text-red-500'}`}>
+                    {status.drive_detected ? 'Oui' : 'Non'}
+                  </span>
+                </div>
+              </div>
+            )}
+            {error && <p className="text-red-500 text-[11px] mb-2">{error}</p>}
+            <button onClick={runNow} disabled={running}
+              className="w-full py-2 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors">
+              {running ? 'Sauvegarde en cours...' : 'Sauvegarder maintenant'}
+            </button>
+            <p className="text-[11px] text-steel-400 mt-3">
+              Branchez la clé USB marquée pour ScolaDesk (fichier <code>.scoladesk_backup</code> à sa racine). Sauvegarde automatique quotidienne à partir de 17h.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Layout({ schoolInfo }) {
   const { user, logout, hasPermission, idleWarning, stayLoggedIn } = useAuth()
   const [actualStudents, setActualStudents] = useState(0)
@@ -366,6 +456,7 @@ export default function Layout({ schoolInfo }) {
             <StudentCount actual={actualStudents} allowed={schoolInfo?.allowed_students} />
           </div>
           <div className="flex items-center gap-1">
+            {user?.role === 'admin' && <BackupPanel />}
             <NetworkPanel />
             <button
               onClick={() => window.location.reload()}

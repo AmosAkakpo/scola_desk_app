@@ -131,6 +131,10 @@ function runMigrations() {
         {
             version: '018_promotion_engine',
             run: require('./migration/018_promotion_engine').migration018
+        },
+        {
+            version: '019_backup_log',
+            run: require('./migration/019_backup_log').migration019
         }
     ]
 

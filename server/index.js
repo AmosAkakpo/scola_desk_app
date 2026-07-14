@@ -48,6 +48,18 @@ app.use('/api/sync', require('./routes/sync'))
 app.use('/api/restore', require('./routes/restore'))
 app.use('/api/users', require('./routes/users'))
 app.use('/api/promotion', require('./routes/promotion'))
+app.use('/api/backup', require('./routes/backup'))
+
+// USB backup runs on a background timer, checked every 15 min -- catches
+// both "app was already open at 5 PM" and "USB got plugged in later that
+// evening" instead of requiring an exact-time trigger.
+const { maybeRunScheduledBackup } = require('./utils/usbBackup')
+setInterval(() => {
+    try {
+        const { getDb } = require('./db/init')
+        maybeRunScheduledBackup(getDb())
+    } catch (err) { console.error('[USB BACKUP SCHEDULER]', err) }
+}, 15 * 60 * 1000)
 
 // ─── Static frontend (multi-poste LAN access) ───────────────
 // Serves the built React app so secondary PCs on the school's network can

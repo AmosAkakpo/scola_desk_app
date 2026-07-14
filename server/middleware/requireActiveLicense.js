@@ -10,12 +10,12 @@ const { getDb } = require('../db/init')
 // passes through -- this middleware only fires once a real expiry exists
 // and has passed.
 //
-// /api/sync is exempt even for writes (owner 2026-07-13: an unpaid school
-// should still be able to back up its data -- data safety shouldn't
-// depend on payment status).
+// /api/sync and /api/backup are exempt even for writes (owner 2026-07-13:
+// an unpaid school should still be able to back up its data -- data
+// safety shouldn't depend on payment status).
 function requireActiveLicense(req, res, next) {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next()
-    if (req.path.startsWith('/api/sync')) return next()
+    if (req.path.startsWith('/api/sync') || req.path.startsWith('/api/backup')) return next()
 
     try {
         const db = getDb()
