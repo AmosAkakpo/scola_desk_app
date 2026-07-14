@@ -35,9 +35,14 @@ function pruneOldBackups(backupDir) {
   }
 }
 
-// Uses better-sqlite3's online backup API (safe, consistent snapshot even
-// while the DB is live in WAL mode) rather than a plain file copy, which
-// could grab a half-written page mid-write.
+// Not better-sqlite3's online backup API -- verified (2026-07-16) that
+// db.backup() fails outright between encrypted databases with this
+// library ("incompatible source and target databases"): the native path
+// opens the destination fresh with no way to pass it a key, and there's
+// no SQL-level export function in this build either (sqlite3mc_export /
+// sqlite3_export / sqlcipher_export all probed, none exist). Since the
+// live file is already encrypted at rest, a WAL-checkpointed raw file
+// copy IS a valid encrypted backup -- no online-backup API needed.
 async function runBackup(db) {
   const drive = findBackupDrive()
   if (!drive) return { ok: false, reason: 'NO_USB' }
@@ -52,11 +57,16 @@ async function runBackup(db) {
   try {
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
 
-    await db.backup(filePath)
+    // db.name is the path better-sqlite3 opened the connection with.
+    db.pragma('wal_checkpoint(TRUNCATE)')
+    fs.copyFileSync(db.name, filePath)
 
     // Integrity check on the copy, via a throwaway read-only connection --
     // never trust a backup that hasn't actually been verified openable.
+    // A raw file copy of an encrypted DB is still encrypted, so this
+    // connection needs the same key.
     const check = new Database(filePath, { readonly: true })
+    check.pragma(`key='${process.env.SCOLA_DB_KEY}'`)
     const result = check.pragma('integrity_check')
     check.close()
     const integrityOk = result.length === 1 && result[0].integrity_check === 'ok'
