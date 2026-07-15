@@ -1,10 +1,37 @@
 const { app, BrowserWindow, shell } = require('electron')
 const path = require('path')
+const fs = require('fs')
+const http = require('http')
 const { fork } = require('child_process')
 const { registerHardwareIPC } = require('./ipc/hardware')
 const { getOrCreateDbKey, storeDbKey } = require('./dbKey')
 
 const isDev = !app.isPackaged
+
+// Packaged GUI-subsystem exe has no console a support call could ever read
+// on a school PC -- mirror console output to a plain file next to the DB
+// so a remote support session can ask the owner to open one text file.
+// Overwritten each launch (previous run's log renamed .old), stays small.
+function setupFileLogging() {
+    const logDir = path.join(app.getPath('userData'), 'logs')
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true })
+    const logPath = path.join(logDir, 'main.log')
+    if (fs.existsSync(logPath)) {
+        fs.renameSync(logPath, path.join(logDir, 'main.log.old'))
+    }
+    const stream = fs.createWriteStream(logPath, { flags: 'a' })
+    const write = (level, args) => {
+        const line = `[${new Date().toISOString()}] [${level}] ${args.map(a => (a instanceof Error ? a.stack : String(a))).join(' ')}\n`
+        stream.write(line)
+    }
+    const origLog = console.log.bind(console)
+    const origErr = console.error.bind(console)
+    console.log = (...args) => { origLog(...args); write('LOG', args) }
+    console.error = (...args) => { origErr(...args); write('ERR', args) }
+    process.on('uncaughtException', (err) => console.error('[UNCAUGHT]', err))
+    process.on('unhandledRejection', (err) => console.error('[UNHANDLED REJECTION]', err))
+    console.log(`ScolaDesk starting — packaged=${app.isPackaged}, version=${app.getVersion()}`)
+}
 
 let mainWindow
 let serverProcess
@@ -24,8 +51,35 @@ function startExpressServer() {
             PORT: '3000',
             NODE_ENV: isDev ? 'development' : 'production',
             SCOLA_DB_KEY: dbKey,
+            // Without this, a packaged fork (process.defaultApp === false)
+            // tries to launch the child as another full Electron app
+            // instance instead of running serverPath as plain Node — it
+            // silently never binds the port. Dev "works" without it only
+            // because unpackaged Electron sets defaultApp=true, which
+            // happens to let fork() run a script directly; that's
+            // packaging-fragile, so force it explicitly either way.
+            ELECTRON_RUN_AS_NODE: '1',
+            // Packaged, the server sits in resources/server but its
+            // dependencies live inside app.asar — outside the child's
+            // normal directory walk-up. Electron's fs patches make the
+            // asar path readable; NODE_PATH makes require() look there.
+            ...(isDev ? {} : {
+                NODE_PATH: path.join(process.resourcesPath, 'app.asar', 'node_modules'),
+                // The forked server runs as plain Node (no Electron API),
+                // so it can't resolve userData itself -- without this it
+                // falls back to a directory inside the install folder,
+                // which isn't writable under C:\Program Files.
+                SCOLA_DATA_DIR: path.join(app.getPath('userData'), 'data'),
+            }),
         },
         stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+    })
+
+    serverProcess.on('error', (err) => {
+        console.error('[SERVER] Failed to start:', err)
+    })
+    serverProcess.on('exit', (code, signal) => {
+        console.error(`[SERVER] Exited unexpectedly (code=${code}, signal=${signal})`)
     })
 
     // Activation rekeys the DB to the school's official CAP-escrowed key —
@@ -50,7 +104,12 @@ function createWindow() {
         height: 800,
         minWidth: 1024,
         minHeight: 600,
-        icon: path.join(__dirname, '../public/android-chrome-512x512.png'),
+        // dev reads from public/ directly; production ships dist/ (Vite
+        // already copies public/'s contents there at build time) as an
+        // extraResource — public/ itself is never packaged.
+        icon: isDev
+            ? path.join(__dirname, '../public/android-chrome-512x512.png')
+            : path.join(process.resourcesPath, 'dist/android-chrome-512x512.png'),
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -67,6 +126,10 @@ function createWindow() {
         ? 'http://localhost:5173'
         : 'http://localhost:3000'
 
+    mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+        console.error(`[WINDOW] Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`)
+    })
+
     mainWindow.loadURL(url)
 
     mainWindow.once('ready-to-show', () => {
@@ -74,16 +137,55 @@ function createWindow() {
         if (isDev) mainWindow.webContents.openDevTools()
     })
 
+    // Belt-and-suspenders: ready-to-show should always fire, but a window
+    // that silently never shows is worse than one that shows a moment
+    // early -- never leave the user staring at nothing.
+    setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+            mainWindow.show()
+        }
+    }, 5000)
+
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         shell.openExternal(url)
         return { action: 'deny' }
     })
 }
 
-app.whenReady().then(() => {
+// First boot can run 19 migrations (or the one-time plaintext->encrypted
+// migration) before the server binds its port -- poll instead of guessing
+// a fixed delay, so the window never opens on a server that isn't ready
+// yet, but also never waits longer than necessary on a normal boot.
+function waitForServer(url, { timeoutMs = 30000, intervalMs = 300 } = {}) {
+    const deadline = Date.now() + timeoutMs
+    return new Promise((resolve) => {
+        const attempt = () => {
+            const req = http.get(`${url}/api/health`, (res) => {
+                res.resume()
+                if (res.statusCode === 200) return resolve(true)
+                retry()
+            })
+            req.on('error', retry)
+            req.setTimeout(intervalMs, () => req.destroy())
+        }
+        const retry = () => {
+            if (Date.now() >= deadline) return resolve(false)
+            setTimeout(attempt, intervalMs)
+        }
+        attempt()
+    })
+}
+
+app.whenReady().then(async () => {
+    setupFileLogging()
     registerHardwareIPC()
     startExpressServer()
-    setTimeout(createWindow, 1500)
+    const url = isDev ? 'http://localhost:5173' : 'http://localhost:3000'
+    const ready = await waitForServer(url)
+    if (!ready) console.error('[BOOT] Server did not become ready within timeout — loading anyway')
+    createWindow()
+}).catch((err) => {
+    console.error('[BOOT] whenReady chain failed:', err)
 })
 
 app.on('window-all-closed', () => {

@@ -2,7 +2,7 @@ const express = require('express')
 const router = express.Router()
 const path = require('path')
 const fs = require('fs')
-const { getDb } = require('../db/init')
+const { getDb, getDataDir } = require('../db/init')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
 
@@ -11,7 +11,7 @@ router.get('/school-logo', (req, res) => {
   const db = getDb()
   const logoPath = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_path'").get()?.value
   if (!logoPath) return res.status(404).end()
-  const fullPath = path.join(__dirname, '../../data', logoPath)
+  const fullPath = path.join(getDataDir(), logoPath)
   if (!fs.existsSync(fullPath)) return res.status(404).end()
   res.setHeader('Content-Type', 'image/png')
   res.setHeader('Cache-Control', 'no-cache')
@@ -88,7 +88,7 @@ router.get('/', requirePermission('students.view'), (req, res) => {
   const logoPath = settings.school_logo_path || null
   let logoExists = false
   if (logoPath) {
-    const fullPath = path.join(__dirname, '../../data', logoPath)
+    const fullPath = path.join(getDataDir(), logoPath)
     logoExists = fs.existsSync(fullPath)
   }
 
@@ -161,8 +161,13 @@ router.put('/conseil-decision-ranges', requirePermission('students.edit'), (req,
 
 // ─── GET /api/settings/benin-flag — Serve bundled flag image ─
 router.get('/benin-flag', (req, res) => {
-  const flagPath = path.join(__dirname, '../../testing/drapeau_benin.png')
-  if (!fs.existsSync(flagPath)) return res.status(404).end()
+  // testing/ is gitignored and never shipped -- packaged builds serve the
+  // copy Vite puts in dist/ (resources/dist next to resources/server).
+  const flagPath = [
+    path.join(__dirname, '../../testing/drapeau_benin.png'),
+    path.join(__dirname, '../../dist/drapeau_benin.png'),
+  ].find(fs.existsSync)
+  if (!flagPath) return res.status(404).end()
   res.setHeader('Content-Type', 'image/png')
   res.setHeader('Cache-Control', 'public, max-age=86400')
   fs.createReadStream(flagPath).pipe(res)
@@ -171,7 +176,7 @@ router.get('/benin-flag', (req, res) => {
 // ─── POST /api/settings/school-logo — Upload logo ───────────
 router.post('/school-logo', express.raw({ type: '*/*', limit: '5mb' }), (req, res) => {
   try {
-    const logoDir = path.join(__dirname, '../../data/logos')
+    const logoDir = path.join(getDataDir(), 'logos')
     if (!fs.existsSync(logoDir)) fs.mkdirSync(logoDir, { recursive: true })
 
     const filename = 'school-logo.png'
@@ -192,7 +197,7 @@ router.delete('/school-logo', (req, res) => {
   const db = getDb()
   const logoPath = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_path'").get()?.value
   if (logoPath) {
-    const fullPath = path.join(__dirname, '../../data', logoPath)
+    const fullPath = path.join(getDataDir(), logoPath)
     if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath)
   }
   db.prepare("DELETE FROM app_settings WHERE key = 'school_logo_path'").run()

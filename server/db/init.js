@@ -7,12 +7,19 @@ const fs = require('fs')
 
 let db
 
-function getDatabasePath() {
+// Single source of truth for where the app's writable files live (DB,
+// uploaded logos). Packaged: main.js passes the userData-based dir down
+// via env, because this process is plain Node -- require('electron')
+// doesn't work here, and the old fallback silently landed files inside
+// the install folder, unwritable under C:\Program Files.
+function getDataDir() {
     const isDev = process.env.NODE_ENV === 'development'
 
     let base
 
-    if (isDev) {
+    if (process.env.SCOLA_DATA_DIR) {
+        base = process.env.SCOLA_DATA_DIR
+    } else if (isDev) {
         base = path.join(__dirname, '../../data')
     } else {
         try {
@@ -27,7 +34,11 @@ function getDatabasePath() {
         fs.mkdirSync(base, { recursive: true })
     }
 
-    return path.join(base, 'scolaDesk.db')
+    return base
+}
+
+function getDatabasePath() {
+    return path.join(getDataDir(), 'scolaDesk.db')
 }
 
 // Plain SQLite files literally start with this 16-byte header; an
@@ -246,4 +257,4 @@ function getDb() {
     return db
 }
 
-module.exports = { initializeDatabase, getDb, isPlaintextDb, encryptPlaintextDb }
+module.exports = { initializeDatabase, getDb, getDataDir, isPlaintextDb, encryptPlaintextDb }
