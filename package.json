@@ -33,6 +33,10 @@
       {
         "from": "dist",
         "to": "dist"
+      },
+      {
+        "from": ".env",
+        "to": ".env"
       }
     ],
     "win": {
