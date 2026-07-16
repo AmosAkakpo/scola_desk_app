@@ -210,7 +210,7 @@ function Step3AcademicYear({ onNext }) {
   const now = new Date()
   const yearStart = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1
   const yearEnd = yearStart + 1
-  const [form, setForm] = useState({ label: `${yearStart}-${yearEnd}`, start_date: `${yearStart}-09-01`, end_date: `${yearEnd}-08-20`, periode_type: 'trimestre' })
+  const [form, setForm] = useState({ label: `${yearStart}-${yearEnd}`, periode_type: 'trimestre' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -220,8 +220,6 @@ function Step3AcademicYear({ onNext }) {
       if (res.data.year) {
         setForm({
           label: res.data.year.label,
-          start_date: res.data.year.start_date,
-          end_date: res.data.year.end_date,
           periode_type: res.data.periode_type || 'trimestre',
         })
       }
@@ -229,6 +227,13 @@ function Step3AcademicYear({ onNext }) {
   }, [])
 
   function update(field, value) { setForm(prev => ({ ...prev, [field]: value })) }
+
+  // Fixed convention (non-negotiable): an academic year always runs
+  // Aug 1 -> Jul 31, derived from the label -- display-only, matches
+  // exactly what the server computes and enforces regardless of this UI.
+  const labelMatch = /^(\d{4})-(\d{4})$/.exec(form.label.trim())
+  const derivedStart = labelMatch ? `${labelMatch[1]}-08-01` : null
+  const derivedEnd = labelMatch ? `${labelMatch[2]}-07-31` : null
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -255,16 +260,21 @@ function Step3AcademicYear({ onNext }) {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-steel-500 mb-1">Date de début <span className="text-red-500">*</span></label>
-              <input type="date" required value={form.start_date} onChange={e => update('start_date', e.target.value)}
-                className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand" />
+              <label className="block text-xs text-steel-500 mb-1">Date de début</label>
+              <div className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm bg-steel-50 text-steel-600">
+                {derivedStart || '—'}
+              </div>
             </div>
             <div>
-              <label className="block text-xs text-steel-500 mb-1">Date de fin <span className="text-red-500">*</span></label>
-              <input type="date" required value={form.end_date} onChange={e => update('end_date', e.target.value)}
-                className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand" />
+              <label className="block text-xs text-steel-500 mb-1">Date de fin</label>
+              <div className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm bg-steel-50 text-steel-600">
+                {derivedEnd || '—'}
+              </div>
             </div>
           </div>
+          <p className="text-xs text-steel-400 -mt-2">
+            L'année scolaire va toujours du 1er août au 31 juillet, déduit automatiquement du libellé.
+          </p>
           <div>
             <label className="block text-xs text-steel-500 mb-2">Type de période <span className="text-red-500">*</span></label>
             <div className="flex gap-3">
@@ -285,7 +295,7 @@ function Step3AcademicYear({ onNext }) {
         </div>
         {error && <p className="text-red-500 text-sm">{error}</p>}
         <div className="flex justify-end pt-2">
-          <button type="submit" disabled={loading || !form.label || !form.start_date || !form.end_date}
+          <button type="submit" disabled={loading || !form.label || !labelMatch}
             className="px-6 py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
             {loading ? 'Enregistrement...' : 'Enregistrer et continuer'}
           </button>

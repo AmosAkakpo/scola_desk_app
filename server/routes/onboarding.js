@@ -215,9 +215,9 @@ router.post('/step2', requireStep(2), async (req, res) => {
 // Creates the academic year + generates period records in app_settings.
 router.post('/step3', requireStep(3), (req, res) => {
   try {
-    const { label, start_date, end_date, periode_type } = req.body
+    const { label, periode_type } = req.body
 
-    if (!label || !start_date || !end_date || !periode_type) {
+    if (!label || !periode_type) {
       return res.status(400).json({
         error: 'MISSING_FIELDS',
         message: 'Tous les champs sont requis',
@@ -230,6 +230,22 @@ router.post('/step3', requireStep(3), (req, res) => {
         message: 'Type de période invalide (trimestre ou semestre)',
       })
     }
+
+    // Fixed convention (owner-set 2026-07-13, non-negotiable): an academic
+    // year always runs Aug 1 -> Jul 31, same rule promotion.js uses to
+    // create every later year. Derived server-side from the label instead
+    // of trusting client-submitted dates -- onboarding used to accept
+    // whatever the date pickers sent, which is how a live school ended up
+    // with an Aug 20 end_date and a promotion gate that wouldn't open.
+    const labelMatch = /^(\d{4})-(\d{4})$/.exec(label.trim())
+    if (!labelMatch) {
+      return res.status(400).json({
+        error: 'INVALID_LABEL',
+        message: 'Le libellé doit être au format AAAA-AAAA (ex: 2025-2026)',
+      })
+    }
+    const start_date = `${labelMatch[1]}-08-01`
+    const end_date = `${labelMatch[2]}-07-31`
 
     const db = getDb()
 
