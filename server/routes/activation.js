@@ -293,4 +293,51 @@ router.post('/activate', async (req, res) => {
   }
 })
 
+// ─── Background license check-in ────────────────────────────
+// Owner request 2026-07-16: CAP-side changes (renewal, suspension,
+// reissue) had no way to reach an already-activated install short of the
+// admin manually re-entering a key in Paramètres > Licence. Called from
+// index.js's timer -- gated there to at most once per calendar day, and
+// only attempted at all while the necessary local state exists.
+// A same-device renewal/reissue is picked up silently; a genuine
+// HARDWARE_MISMATCH (different device) is left untouched -- that still
+// requires the admin to manually re-activate, unchanged from before.
+async function runLicenseCheckin(db) {
+  const license = db.prepare('SELECT school_id, hardware_fingerprint FROM license_state LIMIT 1').get()
+  if (!license?.school_id || !license?.hardware_fingerprint) return { ok: false, reason: 'NOT_ACTIVATED' }
+
+  try {
+    const response = await axios.post(`${CAP_URL}/api/license-status`, {
+      school_id: license.school_id,
+      hardware_fingerprint: license.hardware_fingerprint,
+    }, {
+      headers: { 'X-ScolaDesk-Secret': PAYLOAD_SECRET },
+      timeout: 15000,
+    })
+
+    const payload = response.data.payload
+    if (!payload || !verifySignature(payload)) return { ok: false, reason: 'INVALID_PAYLOAD' }
+
+    storeLicenseLocally(db, payload, license.hardware_fingerprint)
+    rekeyIfNeeded(db, payload.db_encryption_key)
+    return { ok: true }
+  } catch (err) {
+    const data = err.response?.data
+    if (data?.error === 'LICENSE_SUSPENDED') {
+      db.prepare('UPDATE license_state SET is_active = 0').run()
+      console.log('[LICENSE CHECKIN] Suspended by CAP.')
+      return { ok: true, suspended: true }
+    }
+    if (data?.error === 'HARDWARE_MISMATCH' || data?.error === 'NOT_FOUND') {
+      // Doesn't match what CAP has on file (e.g. a device change reissue) --
+      // leave local state untouched, admin re-activates manually as before.
+      console.log('[LICENSE CHECKIN]', data.error)
+      return { ok: false, reason: data.error }
+    }
+    // Offline or CAP unreachable -- normal, expected, not worth logging noisily.
+    return { ok: false, reason: 'UNREACHABLE' }
+  }
+}
+
 module.exports = router
+module.exports.runLicenseCheckin = runLicenseCheckin

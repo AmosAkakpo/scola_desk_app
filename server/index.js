@@ -61,6 +61,35 @@ setInterval(() => {
     } catch (err) { console.error('[USB BACKUP SCHEDULER]', err) }
 }, 15 * 60 * 1000)
 
+// License check-in: at most once per calendar day (owner request
+// 2026-07-16 -- "not shooting a request every second", just once when
+// online, once a day if it stays online). The 10-min tick is only ever
+// a cheap "have we already succeeded today?" check locally; it only
+// actually calls CAP once that answer is no, so a school offline for a
+// week makes zero requests until it reconnects, and one immediately
+// once it does.
+const { runLicenseCheckin } = require('./routes/activation')
+async function tryLicenseCheckin() {
+    try {
+        const { getDb } = require('./db/init')
+        const db = getDb()
+        const today = new Date().toISOString().slice(0, 10)
+        const lastCheckin = db.prepare("SELECT value FROM app_settings WHERE key = 'license_checkin_date'").get()?.value
+        if (lastCheckin === today) return
+
+        const result = await runLicenseCheckin(db)
+        if (result.ok) {
+            db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('license_checkin_date', ?, datetime('now'))").run(today)
+        }
+    } catch (err) { console.error('[LICENSE CHECKIN SCHEDULER]', err) }
+}
+// First attempt shortly after boot (a school opening the app shouldn't
+// wait up to 10 min for a same-day renewal/suspension to apply), then
+// every 10 min after -- each tick is a cheap local date check unless
+// today's check-in hasn't succeeded yet.
+setTimeout(tryLicenseCheckin, 30 * 1000)
+setInterval(tryLicenseCheckin, 10 * 60 * 1000)
+
 // ─── Static frontend (multi-poste LAN access) ───────────────
 // Serves the built React app so secondary PCs on the school's network can
 // use a plain browser at http://scoladesk:3000 (or http://<ip>:3000).
