@@ -406,6 +406,7 @@ function Etape3Preview({ yearId, onBack, onNext }) {
   const [rows, setRows] = useState([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState(null)
+  const [capacityWarnings, setCapacityWarnings] = useState([])
   const [loading, setLoading] = useState(true)
   const [overrides, setOverrides] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem(OVERRIDES_STORAGE_KEY)) || [] }
@@ -442,6 +443,7 @@ function Etape3Preview({ yearId, onBack, onNext }) {
       setRows(res.data.rows || [])
       setTotal(res.data.total || 0)
       setSummary(res.data.summary)
+      setCapacityWarnings(res.data.capacity_warnings || [])
       setLoading(false)
     })
   }, [yearId, verdictFilter, search, page, overrides])
@@ -478,6 +480,19 @@ function Etape3Preview({ yearId, onBack, onNext }) {
           {summary.excluded_from_calc > 0 && (
             <span className="text-steel-400">{summary.excluded_from_calc} élève(s) exclu(s) du calcul (renvoyés/transférés)</span>
           )}
+        </div>
+      )}
+
+      {/* Informational only -- never blocks execution, staff can just raise
+          the seat count afterward. Just a heads-up before committing. */}
+      {capacityWarnings.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700">
+          <p className="font-medium mb-1">Capacité dépassée après promotion :</p>
+          <ul className="space-y-0.5">
+            {capacityWarnings.map((w, i) => (
+              <li key={i}>{w.label} ({w.level_name}) : {w.incoming} élèves attendus pour {w.capacity} places</li>
+            ))}
+          </ul>
         </div>
       )}
 

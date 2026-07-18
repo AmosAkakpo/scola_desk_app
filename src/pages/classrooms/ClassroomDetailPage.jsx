@@ -96,7 +96,15 @@ export default function ClassroomDetailPage() {
             {!editing ? (
               <>
                 <h1 className="text-xl font-medium text-steel-900">{classroom.label}</h1>
-                <p className="text-sm text-steel-500 mt-0.5">{classroom.level_name} · {students.length}/{classroom.capacity} élèves</p>
+                <p className="text-sm text-steel-500 mt-0.5 flex items-center gap-2">
+                  <span>{classroom.level_name} · {students.length}/{classroom.capacity} élèves</span>
+                  {/* Informational only -- owner decision 2026-07-18: never block
+                      adding students over capacity, staff can just raise the
+                      seat count. This is a heads-up, not a gate. */}
+                  {students.length > classroom.capacity && (
+                    <span className="px-1.5 py-0.5 bg-red-50 text-red-500 rounded text-xs font-medium">Plein</span>
+                  )}
+                </p>
               </>
             ) : (
               <div className="flex gap-3 items-end">

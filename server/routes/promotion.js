@@ -191,6 +191,30 @@ router.post('/preview/:academicYearId', (req, res) => {
 
   const { rows, summary } = computeVerdicts(db, req.params.academicYearId, overrideMap)
 
+  // Informational only (owner decision 2026-07-18: never block promotion on
+  // capacity, staff can just raise the seat count -- but they should see it
+  // coming, not discover an overfull section afterward). Mirrors execute()'s
+  // own classroomCache logic exactly: capacity is set from the FIRST source
+  // classroom that creates a given target, in the same row order execute
+  // processes them in (preview and execute share computeVerdicts, so the
+  // order -- and therefore which capacity wins -- is guaranteed identical).
+  const capacityByTarget = new Map() // "level|serie|label" -> { capacity, incoming }
+  const sourceCapacities = new Map()
+  for (const row of rows) {
+    if (row.graduated || row.verdict === 'exclu' || !row.target) continue
+    const key = `${row.target.level_id}|${row.target.serie_id || 'null'}|${row.target.label}`
+    let entry = capacityByTarget.get(key)
+    if (!entry) {
+      if (!sourceCapacities.has(row.source_classroom_id)) {
+        sourceCapacities.set(row.source_classroom_id, db.prepare('SELECT capacity FROM classrooms WHERE id = ?').get(row.source_classroom_id)?.capacity || 50)
+      }
+      entry = { label: row.target.label, level_name: row.target.level_name, capacity: sourceCapacities.get(row.source_classroom_id), incoming: 0 }
+      capacityByTarget.set(key, entry)
+    }
+    entry.incoming++
+  }
+  const capacityWarnings = Array.from(capacityByTarget.values()).filter(e => e.incoming > e.capacity)
+
   // Preview only needs display fields, not the raw target object execute uses.
   let displayRows = rows.map(r => ({
     student_id: r.student_id,
@@ -225,7 +249,7 @@ router.post('/preview/:academicYearId', (req, res) => {
   const pageSizeNum = Math.max(1, parseInt(page_size) || 50)
   const paged = displayRows.slice((pageNum - 1) * pageSizeNum, pageNum * pageSizeNum)
 
-  return res.json({ rows: paged, total, page: pageNum, page_size: pageSizeNum, summary })
+  return res.json({ rows: paged, total, page: pageNum, page_size: pageSizeNum, summary, capacity_warnings: capacityWarnings })
 })
 
 // ─── POST /api/promotion/execute/:academicYearId — Étape 4 ────────────────
