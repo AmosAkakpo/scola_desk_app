@@ -181,8 +181,16 @@ router.get('/status', (req, res) => {
   // (users are never synced) — the boot flow needs to detect that state.
   const userCount = db.prepare('SELECT COUNT(*) as cnt FROM users WHERE is_deleted = 0 AND is_active = 1').get()?.cnt || 0
 
+  // Set by the background check-in (runLicenseCheckin) when CAP no longer
+  // has an ACTIVE license matching this device's fingerprint -- most
+  // commonly a renewal, since that issues a brand-new key rather than
+  // updating the existing one. Cleared automatically the next time a
+  // check-in actually finds a match (e.g. once the new key is entered).
+  const reactivationNeeded = db.prepare("SELECT value FROM app_settings WHERE key = 'license_reactivation_needed'").get()?.value === '1'
+
   return res.json({
     activated: true,
+    reactivation_needed: reactivationNeeded,
     academic_year_label: academicYearLabel,
     academic_year_end_date: academicYearEndDate,
     configured: config?.is_configured === 1,
@@ -266,6 +274,7 @@ router.post('/activate', async (req, res) => {
     const db = getDb()
     storeLicenseLocally(db, payload, fingerprint)
     rekeyIfNeeded(db, payload.db_encryption_key)
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('license_reactivation_needed', '0', datetime('now'))").run()
 
     return res.json({
       success: true,
@@ -299,9 +308,14 @@ router.post('/activate', async (req, res) => {
 // admin manually re-entering a key in Paramètres > Licence. Called from
 // index.js's timer -- gated there to at most once per calendar day, and
 // only attempted at all while the necessary local state exists.
-// A same-device renewal/reissue is picked up silently; a genuine
-// HARDWARE_MISMATCH (different device) is left untouched -- that still
-// requires the admin to manually re-activate, unchanged from before.
+//
+// Renewal in CAP does NOT update the existing license row in place -- it
+// REVOKES it and INSERTS a brand-new one (a fresh key is generated and
+// meant to be handed to the school), so a renewed school's fingerprint
+// genuinely has no ACTIVE match anymore until someone types the new key
+// in. That's by design, not a bug -- but the app going silent about it
+// (owner-reported 2026-07-16) was: flip 'license_reactivation_needed' so
+// the UI can show a banner instead of doing nothing.
 async function runLicenseCheckin(db) {
   const license = db.prepare('SELECT school_id, hardware_fingerprint FROM license_state LIMIT 1').get()
   if (!license?.school_id || !license?.hardware_fingerprint) return { ok: false, reason: 'NOT_ACTIVATED' }
@@ -320,6 +334,7 @@ async function runLicenseCheckin(db) {
 
     storeLicenseLocally(db, payload, license.hardware_fingerprint)
     rekeyIfNeeded(db, payload.db_encryption_key)
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('license_reactivation_needed', '0', datetime('now'))").run()
     return { ok: true }
   } catch (err) {
     const data = err.response?.data
@@ -329,10 +344,13 @@ async function runLicenseCheckin(db) {
       return { ok: true, suspended: true }
     }
     if (data?.error === 'HARDWARE_MISMATCH' || data?.error === 'NOT_FOUND') {
-      // Doesn't match what CAP has on file (e.g. a device change reissue) --
-      // leave local state untouched, admin re-activates manually as before.
+      // No ACTIVE license matches this device anymore -- most commonly a
+      // renewal (new key issued, needs entering) or a reissue. Surface
+      // it; don't touch license_state itself (still valid until its own
+      // expiry, or already blocked by requireActiveLicense if not).
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('license_reactivation_needed', '1', datetime('now'))").run()
       console.log('[LICENSE CHECKIN]', data.error)
-      return { ok: false, reason: data.error }
+      return { ok: true, reason: data.error }
     }
     // Offline or CAP unreachable -- normal, expected, not worth logging noisily.
     return { ok: false, reason: 'UNREACHABLE' }

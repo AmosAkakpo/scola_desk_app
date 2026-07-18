@@ -82,6 +82,26 @@ function LicenseExpiryBanner({ expiry }) {
   )
 }
 
+// Persistent, NOT dismissible (owner report 2026-07-16: after renewing in
+// CAP, the app just silently kept running on stale local state with no
+// indication anything needed attention). CAP's renewal flow issues a
+// brand-new key rather than updating the existing one, so the background
+// check-in (runLicenseCheckin) genuinely can't apply this one silently --
+// the admin has to type the new key in. Clears itself the moment that
+// happens (server clears license_reactivation_needed on any successful
+// activation), so no dismiss button is needed -- it's not "seen it,
+// ignore it" like the countdown banners, it's "still needs one action."
+function ReactivationBanner() {
+  return (
+    <div className="flex items-center justify-center px-4 py-2 text-sm shrink-0 bg-amber-100 text-amber-800 border-b border-amber-300">
+      <span>
+        Une nouvelle clé de licence a été émise pour votre établissement — entrez-la pour continuer à recevoir les mises à jour de votre abonnement.
+        {' '}<Link to="/settings/license" className="font-medium hover:underline">Entrer la nouvelle clé →</Link>
+      </span>
+    </div>
+  )
+}
+
 // Access matrix (admin sees everything, within the license tier):
 //   - Gestion académique  → admin + secretary
 //   - Finance             → admin + accountant, PRO tier only
@@ -431,6 +451,9 @@ export default function Layout({ schoolInfo }) {
             )}
           </div>
         )}
+
+        {/* New license key issued (renewal/reissue), admin-only, NOT dismissible */}
+        {user?.role === 'admin' && schoolInfo?.reactivation_needed && <ReactivationBanner />}
 
         {/* License-expiry advance warning, admin-only, dismissible */}
         {user?.role === 'admin' && <LicenseExpiryBanner expiry={schoolInfo?.expiry} />}
