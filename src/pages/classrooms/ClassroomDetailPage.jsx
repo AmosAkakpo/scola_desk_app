@@ -57,11 +57,14 @@ export default function ClassroomDetailPage() {
 
   async function moveStudent(studentId, targetId) {
     setMovingStudent(true)
-    await api.post(`/api/students/${studentId}/transfer`, { classroom_id: targetId })
-    setMovingStudent(false)
-    setPendingMove(null)
-    setSelected([])
-    fetchData()
+    try {
+      await api.post(`/api/students/${studentId}/transfer`, { classroom_id: targetId })
+      setPendingMove(null)
+      setSelected([])
+      fetchData()
+    } finally {
+      setMovingStudent(false)
+    }
   }
 
   async function bulkMove(targetId) {
@@ -367,7 +370,11 @@ function BulkMoveModal({ count, classrooms, onClose, onMove }) {
         onCancel={() => setConfirming(false)}
         onConfirm={async () => {
           setSaving(true)
-          await onMove(parseInt(target))
+          try {
+            await onMove(parseInt(target))
+          } finally {
+            setSaving(false)
+          }
         }}
       />
     )

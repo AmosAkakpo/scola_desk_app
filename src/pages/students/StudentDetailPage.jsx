@@ -42,6 +42,7 @@ export default function StudentDetailPage() {
   const [sanctionSaving, setSanctionSaving] = useState(false)
   const [showExpelConfirm, setShowExpelConfirm] = useState(false)
   const [expelMatriculeInput, setExpelMatriculeInput] = useState('')
+  const [expelling, setExpelling] = useState(false)
   const [showTransferOutConfirm, setShowTransferOutConfirm] = useState(false)
   const [transferringOut, setTransferringOut] = useState(false)
   const [defaultConduite, setDefaultConduite] = useState(18)
@@ -72,19 +73,25 @@ export default function StudentDetailPage() {
 
   async function saveEdit() {
     setSavingInfo(true)
-    await api.put(`/api/students/${id}`, editForm)
-    setSavingInfo(false)
-    setShowSaveInfoConfirm(false)
-    setEditing(false)
-    fetchData()
+    try {
+      await api.put(`/api/students/${id}`, editForm)
+      setShowSaveInfoConfirm(false)
+      setEditing(false)
+      fetchData()
+    } finally {
+      setSavingInfo(false)
+    }
   }
 
   async function deleteGuardian(gid) {
     setDeletingGuardian(true)
-    await api.delete(`/api/students/${id}/guardians/${gid}`)
-    setDeletingGuardian(false)
-    setGuardianToDelete(null)
-    fetchData()
+    try {
+      await api.delete(`/api/students/${id}/guardians/${gid}`)
+      setGuardianToDelete(null)
+      fetchData()
+    } finally {
+      setDeletingGuardian(false)
+    }
   }
 
   async function loadSanctions(sem) {
@@ -100,37 +107,51 @@ export default function StudentDetailPage() {
 
   async function saveSanctions() {
     setSanctionSaving(true)
-    await api.put(`/api/students/${id}/sanctions/${sanctionSem}`, { avertissement: sanctions?.avertissement, blame: sanctions?.blame })
-    setSanctionSaving(false)
-    loadSanctions(sanctionSem)
+    try {
+      await api.put(`/api/students/${id}/sanctions/${sanctionSem}`, { avertissement: sanctions?.avertissement, blame: sanctions?.blame })
+      loadSanctions(sanctionSem)
+    } finally {
+      setSanctionSaving(false)
+    }
   }
 
   async function saveConduite() {
     setConduiteSaving(true)
-    await api.put(`/api/students/${id}/sanctions/${sanctionSem}`, {
-      avertissement: sanctions?.avertissement,
-      blame: sanctions?.blame,
-      conduite_score: conduiteScore,
-      conduite_note: conduiteNote || null,
-    })
-    setConduiteSaving(false)
-    setShowConduiteConfirm(false)
-    loadSanctions(sanctionSem)
+    try {
+      await api.put(`/api/students/${id}/sanctions/${sanctionSem}`, {
+        avertissement: sanctions?.avertissement,
+        blame: sanctions?.blame,
+        conduite_score: conduiteScore,
+        conduite_note: conduiteNote || null,
+      })
+      setShowConduiteConfirm(false)
+      loadSanctions(sanctionSem)
+    } finally {
+      setConduiteSaving(false)
+    }
   }
 
   async function confirmExpel() {
-    await api.post(`/api/students/${id}/expel`)
-    setShowExpelConfirm(false)
-    setExpelMatriculeInput('')
-    fetchData()
+    setExpelling(true)
+    try {
+      await api.post(`/api/students/${id}/expel`)
+      setShowExpelConfirm(false)
+      setExpelMatriculeInput('')
+      fetchData()
+    } finally {
+      setExpelling(false)
+    }
   }
 
   async function confirmTransferOut() {
     setTransferringOut(true)
-    await api.post(`/api/students/${id}/mark-transferred`)
-    setTransferringOut(false)
-    setShowTransferOutConfirm(false)
-    fetchData()
+    try {
+      await api.post(`/api/students/${id}/mark-transferred`)
+      setShowTransferOutConfirm(false)
+      fetchData()
+    } finally {
+      setTransferringOut(false)
+    }
   }
 
   if (loading) return <div className="flex justify-center py-20"><div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" /></div>
@@ -468,9 +489,9 @@ export default function StudentDetailPage() {
               <button onClick={() => { setShowExpelConfirm(false); setExpelMatriculeInput('') }}
                 className="flex-1 py-2.5 border border-steel-200 text-steel-600 rounded-lg text-sm font-medium hover:bg-steel-50">Annuler</button>
               <button onClick={confirmExpel}
-                disabled={expelMatriculeInput.trim() !== (student.matricule || '').trim()}
+                disabled={expelling || expelMatriculeInput.trim() !== (student.matricule || '').trim()}
                 className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors">
-                Confirmer l'expulsion
+                {expelling ? 'Expulsion...' : "Confirmer l'expulsion"}
               </button>
             </div>
           </div>
@@ -616,8 +637,12 @@ function AddGuardianModal({ studentId, onClose, onDone }) {
     e.preventDefault()
     if (!form.full_name.trim()) return
     setSaving(true)
-    await api.post(`/api/students/${studentId}/guardians`, form)
-    onDone()
+    try {
+      await api.post(`/api/students/${studentId}/guardians`, form)
+      onDone()
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (

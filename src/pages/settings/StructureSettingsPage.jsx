@@ -278,11 +278,14 @@ function LevelsManager({ onUpdate, showMsg, askConfirm, series }) {
 
   async function save() {
     setSaving(true)
-    await api.put('/api/settings/levels', { level_ids: selected })
-    setOrigSelected([...selected])
-    setSaving(false)
-    showMsg('Niveaux mis à jour')
-    onUpdate()
+    try {
+      await api.put('/api/settings/levels', { level_ids: selected })
+      setOrigSelected([...selected])
+      showMsg('Niveaux mis à jour')
+      onUpdate()
+    } finally {
+      setSaving(false)
+    }
   }
 
   const hasChanged = JSON.stringify([...selected].sort()) !== JSON.stringify([...origSelected].sort())
@@ -622,12 +625,15 @@ function ExamensManager({ onUpdate, showMsg }) {
   async function confirmEnableCohort() {
     if (!examName.trim()) return
     setSaving(true)
-    await api.put(`/api/promotion/exam-cohort-levels/${editing.id}`, { is_exam_cohort: true, exam_name: examName.trim() })
-    setSaving(false)
-    setEditing(null)
-    showMsg('Examen configuré')
-    load()
-    onUpdate?.()
+    try {
+      await api.put(`/api/promotion/exam-cohort-levels/${editing.id}`, { is_exam_cohort: true, exam_name: examName.trim() })
+      setEditing(null)
+      showMsg('Examen configuré')
+      load()
+      onUpdate?.()
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function updateRule(examType, field, value) {

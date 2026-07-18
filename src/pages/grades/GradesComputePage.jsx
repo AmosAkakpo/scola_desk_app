@@ -21,9 +21,12 @@ export default function GradesComputePage() {
   async function loadSummaries() {
     if (!classroomId) return
     setLoading(true)
-    const res = await api.get(`/api/grades/summary/${classroomId}/${semester}`)
-    setSummaries(res.data.summaries || [])
-    setLoading(false)
+    try {
+      const res = await api.get(`/api/grades/summary/${classroomId}/${semester}`)
+      setSummaries(res.data.summaries || [])
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { if (classroomId) loadSummaries() }, [classroomId, semester])
@@ -31,9 +34,12 @@ export default function GradesComputePage() {
   async function handleCompute() {
     if (!classroomId) return
     setComputing(true)
-    await api.post(`/api/grades/compute/${classroomId}/${semester}`)
-    setComputing(false)
-    loadSummaries()
+    try {
+      await api.post(`/api/grades/compute/${classroomId}/${semester}`)
+      loadSummaries()
+    } finally {
+      setComputing(false)
+    }
   }
 
   const classStats = summaries.length > 0 ? {
@@ -208,21 +214,24 @@ function DecisionsPanel({ classroomId, semester }) {
 
   async function handleSave() {
     setSaving(true)
-    const payload = Object.entries(decisions).map(([sid, d]) => ({
-      student_id: parseInt(sid),
-      conduite_score: d.conduite_score === '' ? null : parseFloat(d.conduite_score),
-      avertissement: d.avertissement,
-      blame: d.blame,
-      exclusion_temporaire: d.exclusion_temporaire,
-      felicitation: d.felicitation,
-      encouragement: d.encouragement,
-      tableau_honneur: d.tableau_honneur,
-      conseil_decision: d.conseil_decision,
-    }))
-    await api.post(`/api/decisions/${classroomId}/${semester}`, { decisions: payload })
-    setSaving(false)
-    setMsg('Enregistré')
-    setTimeout(() => setMsg(''), 2000)
+    try {
+      const payload = Object.entries(decisions).map(([sid, d]) => ({
+        student_id: parseInt(sid),
+        conduite_score: d.conduite_score === '' ? null : parseFloat(d.conduite_score),
+        avertissement: d.avertissement,
+        blame: d.blame,
+        exclusion_temporaire: d.exclusion_temporaire,
+        felicitation: d.felicitation,
+        encouragement: d.encouragement,
+        tableau_honneur: d.tableau_honneur,
+        conseil_decision: d.conseil_decision,
+      }))
+      await api.post(`/api/decisions/${classroomId}/${semester}`, { decisions: payload })
+      setMsg('Enregistré')
+      setTimeout(() => setMsg(''), 2000)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) return <div className="flex justify-center py-8"><div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" /></div>
