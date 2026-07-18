@@ -67,6 +67,14 @@ export default function LicenseSettingsPage() {
   }
 
   const expired = status?.license_status === 'expired'
+  // Reactivation is also needed when CAP no longer recognizes this
+  // device's license at all (renewal/reissue issued a new key) even
+  // though the stale local copy hasn't hit its own expiry yet -- the
+  // banner that links here covers exactly this case, so the form must
+  // actually appear for it (owner report 2026-07-18: banner linked here
+  // but the form only showed for local 'expired', leaving nowhere to
+  // type the new key).
+  const needsKeyEntry = expired || status?.reactivation_needed
 
   return (
     <div className="space-y-6">
@@ -86,8 +94,10 @@ export default function LicenseSettingsPage() {
             </div>
             <div className="col-span-2">
               <p className="text-steel-500 text-xs">Statut</p>
-              <p className={`font-medium ${expired ? 'text-red-600' : 'text-brand'}`}>
-                {expired ? 'Expirée — mode lecture seule' : 'Active'}
+              <p className={`font-medium ${needsKeyEntry ? 'text-red-600' : 'text-brand'}`}>
+                {expired ? 'Expirée — mode lecture seule'
+                  : status?.reactivation_needed ? 'Nouvelle clé requise — mode lecture seule'
+                  : 'Active'}
               </p>
             </div>
           </div>
@@ -96,9 +106,11 @@ export default function LicenseSettingsPage() {
         )}
       </div>
 
-      {expired && (
+      {needsKeyEntry && (
         <div className="bg-white rounded-xl border border-steel-200 p-6">
-          <h2 className="text-sm font-semibold text-steel-800 mb-1">Renouveler la licence</h2>
+          <h2 className="text-sm font-semibold text-steel-800 mb-1">
+            {status?.reactivation_needed && !expired ? 'Entrer la nouvelle clé' : 'Renouveler la licence'}
+          </h2>
           <p className="text-xs text-steel-500 mb-4">
             Entrez le code école et la nouvelle clé de licence fournis par l'équipe ScolaDesk. Une connexion internet est requise.
           </p>

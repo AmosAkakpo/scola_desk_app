@@ -82,26 +82,6 @@ function LicenseExpiryBanner({ expiry }) {
   )
 }
 
-// Persistent, NOT dismissible (owner report 2026-07-16: after renewing in
-// CAP, the app just silently kept running on stale local state with no
-// indication anything needed attention). CAP's renewal flow issues a
-// brand-new key rather than updating the existing one, so the background
-// check-in (runLicenseCheckin) genuinely can't apply this one silently --
-// the admin has to type the new key in. Clears itself the moment that
-// happens (server clears license_reactivation_needed on any successful
-// activation), so no dismiss button is needed -- it's not "seen it,
-// ignore it" like the countdown banners, it's "still needs one action."
-function ReactivationBanner() {
-  return (
-    <div className="flex items-center justify-center px-4 py-2 text-sm shrink-0 bg-amber-100 text-amber-800 border-b border-amber-300">
-      <span>
-        Une nouvelle clé de licence a été émise pour votre établissement — entrez-la pour continuer à recevoir les mises à jour de votre abonnement.
-        {' '}<Link to="/settings/license" className="font-medium hover:underline">Entrer la nouvelle clé →</Link>
-      </span>
-    </div>
-  )
-}
-
 // Access matrix (admin sees everything, within the license tier):
 //   - Gestion académique  → admin + secretary
 //   - Finance             → admin + accountant, PRO tier only
@@ -318,11 +298,25 @@ function BackupPanel() {
 export default function Layout({ schoolInfo }) {
   const { user, logout, hasPermission, idleWarning, stayLoggedIn } = useAuth()
   const [actualStudents, setActualStudents] = useState(0)
+  const [licenseToast, setLicenseToast] = useState('')
 
   useEffect(() => {
     api.get('/api/grades/dashboard/stats').then(res => {
       setActualStudents(res.data.total_students || 0)
     }).catch(() => {})
+  }, [])
+
+  // Fires from api.js on ANY blocked write, anywhere in the app -- not
+  // just pages with their own error handling (owner report 2026-07-18:
+  // expulsion/transfert/sanction just spun and died silently). One
+  // global toast covers every current and future mutating action.
+  useEffect(() => {
+    const handler = (e) => {
+      setLicenseToast(e.detail || 'Action bloquée — licence non active.')
+      setTimeout(() => setLicenseToast(''), 5000)
+    }
+    window.addEventListener('scola:license-blocked', handler)
+    return () => window.removeEventListener('scola:license-blocked', handler)
   }, [])
 
   const isPro = (schoolInfo?.tier || '').toUpperCase() === 'PRO'
@@ -442,18 +436,26 @@ export default function Layout({ schoolInfo }) {
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Read-only banner — persistent, no dismiss, license genuinely expired */}
-        {schoolInfo?.license_status === 'expired' && (
+        {/* Read-only banner — persistent, no dismiss. Covers two distinct
+            server-side triggers (requireActiveLicense.js) that both mean
+            the same thing to the user: writes are blocked until a key is
+            entered in Paramètres > Licence. One banner, not two, so a
+            renewal doesn't show both "new key issued" AND "read-only"
+            with different wording for the same lockout. */}
+        {(schoolInfo?.license_status === 'expired' || schoolInfo?.reactivation_needed) && (
           <div className="flex items-center justify-between px-4 py-2 bg-red-600 text-white text-sm shrink-0">
-            <span className="font-medium">Licence expirée — mode lecture seule. Les ajouts et modifications sont désactivés.</span>
+            <span className="font-medium">
+              {schoolInfo?.license_status === 'expired'
+                ? 'Licence expirée — mode lecture seule. Les ajouts et modifications sont désactivés.'
+                : 'Nouvelle clé de licence requise — mode lecture seule. Les ajouts et modifications sont désactivés.'}
+            </span>
             {user?.role === 'admin' && (
-              <Link to="/settings/license" className="underline hover:no-underline shrink-0 ml-3">Renouveler →</Link>
+              <Link to="/settings/license" className="underline hover:no-underline shrink-0 ml-3">
+                {schoolInfo?.license_status === 'expired' ? 'Renouveler →' : 'Entrer la nouvelle clé →'}
+              </Link>
             )}
           </div>
         )}
-
-        {/* New license key issued (renewal/reissue), admin-only, NOT dismissible */}
-        {user?.role === 'admin' && schoolInfo?.reactivation_needed && <ReactivationBanner />}
 
         {/* License-expiry advance warning, admin-only, dismissible */}
         {user?.role === 'admin' && <LicenseExpiryBanner expiry={schoolInfo?.expiry} />}
@@ -499,6 +501,18 @@ export default function Layout({ schoolInfo }) {
           <Outlet />
         </main>
       </div>
+
+      {/* Global toast — any blocked write, anywhere (see the listener above) */}
+      {licenseToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 bg-red-600 text-white text-sm rounded-lg shadow-lg">
+          <span>{licenseToast}</span>
+          {user?.role === 'admin' && (
+            <Link to="/settings/license" className="underline hover:no-underline font-medium shrink-0">
+              Paramètres &gt; Licence
+            </Link>
+          )}
+        </div>
+      )}
     </div>
   )
 }

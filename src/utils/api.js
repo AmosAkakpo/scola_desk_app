@@ -26,6 +26,15 @@ api.interceptors.response.use(
         if (err.response?.data?.error === 'SESSION_REPLACED') {
             window.dispatchEvent(new CustomEvent('scola:session-replaced'))
         }
+        // Fires on EVERY blocked write app-wide (requireActiveLicense.js),
+        // not just the pages that happen to have their own error handling
+        // -- owner report 2026-07-18: expulsion/transfert/sanction just
+        // spun and died with an uncaught console error, no feedback at
+        // all. One global toast instead of auditing/disabling every
+        // mutating button across the app for the same practical result.
+        if (err.response?.data?.error === 'LICENSE_EXPIRED' || err.response?.data?.error === 'LICENSE_REACTIVATION_NEEDED') {
+            window.dispatchEvent(new CustomEvent('scola:license-blocked', { detail: message }))
+        }
         return Promise.reject({ ...err, friendlyMessage: message })
     }
 )
