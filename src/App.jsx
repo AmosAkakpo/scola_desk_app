@@ -88,7 +88,7 @@ function LoadingScreen() {
 }
 
 function ProtectedApp({ schoolInfo }) {
-  const { isAuthenticated, loading } = useAuth()
+  const { isAuthenticated, loading, user } = useAuth()
 
   if (loading) return <LoadingScreen />
   if (!isAuthenticated) return <LoginPage onLogin={() => {}} />
@@ -129,7 +129,11 @@ function ProtectedApp({ schoolInfo }) {
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/fin-annee" element={<FinAnneePage />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          {/* Accountants don't have students.view, so /api/grades/dashboard/stats
+              403s and the general dashboard just shows an error (owner
+              report 2026-07-18) -- send them straight to the Finance
+              dashboard instead, the one page that's actually theirs. */}
+          <Route path="*" element={<Navigate to={user?.role === 'accountant' ? '/finance' : '/dashboard'} replace />} />
         </Route>
       </Routes>
     </BrowserRouter>
