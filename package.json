@@ -1,7 +1,7 @@
 {
   "name": "scola_desk_v1.0",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.12.0",
   "description": "ScolaDesk - School Management System",
   "main": "electron/main.js",
   "scripts": {

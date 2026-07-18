@@ -20,7 +20,7 @@ initializeDatabase()
 
 // Health check
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', app: 'ScolaDesk', version: '1.0.0' })
+    res.json({ status: 'ok', app: 'ScolaDesk', version: '1.12.0' })
 })
 
 // Routes
