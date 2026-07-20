@@ -8,6 +8,21 @@ const { getOrCreateDbKey, storeDbKey } = require('./dbKey')
 
 const isDev = !app.isPackaged
 
+// Owner report 2026-07-18: nothing stopped opening the app twice -- two
+// instances would both try to bind port 3000 and both open the same
+// encrypted DB file, real risk of corruption or a confusing silent
+// failure. Must be claimed BEFORE anything else runs: if a second
+// launch loses the race, it quits immediately here, before ever
+// forking a server or touching the database.
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+    // app.quit() alone doesn't stop the rest of this script from running --
+    // without the early return below, this losing instance would still
+    // reach app.whenReady() further down and fork its own server.
+    app.quit()
+    return
+}
+
 // Packaged GUI-subsystem exe has no console a support call could ever read
 // on a school PC -- mirror console output to a plain file next to the DB
 // so a remote support session can ask the owner to open one text file.
@@ -175,6 +190,15 @@ function waitForServer(url, { timeoutMs = 30000, intervalMs = 300 } = {}) {
         attempt()
     })
 }
+
+// Fires on the WINNING instance when a second launch is attempted --
+// bring the existing window forward instead of leaving the user
+// wondering why nothing happened when they double-clicked the icon.
+app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+})
 
 app.whenReady().then(async () => {
     setupFileLogging()
