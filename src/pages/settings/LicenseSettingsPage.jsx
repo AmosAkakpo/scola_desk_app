@@ -67,14 +67,14 @@ export default function LicenseSettingsPage() {
   }
 
   const expired = status?.license_status === 'expired'
-  // Reactivation is also needed when CAP no longer recognizes this
-  // device's license at all (renewal/reissue issued a new key) even
-  // though the stale local copy hasn't hit its own expiry yet -- the
-  // banner that links here covers exactly this case, so the form must
-  // actually appear for it (owner report 2026-07-18: banner linked here
-  // but the form only showed for local 'expired', leaving nowhere to
-  // type the new key).
-  const needsKeyEntry = expired || status?.reactivation_needed
+  // The key-entry form is ALWAYS shown now, not gated behind a status
+  // check (owner report 2026-07-18, second time this class of bug hit:
+  // the advance-warning banner -- "expires in N days", shown while
+  // still active -- also links here, and with the form gated behind
+  // expired/reactivation_needed it rendered nothing for that case
+  // either. Entering a key proactively before the deadline is a normal
+  // thing to want to do; there's no state where hiding the form makes
+  // sense.
 
   return (
     <div className="space-y-6">
@@ -94,7 +94,7 @@ export default function LicenseSettingsPage() {
             </div>
             <div className="col-span-2">
               <p className="text-steel-500 text-xs">Statut</p>
-              <p className={`font-medium ${needsKeyEntry ? 'text-red-600' : 'text-brand'}`}>
+              <p className={`font-medium ${expired || status?.reactivation_needed ? 'text-red-600' : 'text-brand'}`}>
                 {expired ? 'Expirée — mode lecture seule'
                   : status?.reactivation_needed ? 'Nouvelle clé requise — mode lecture seule'
                   : 'Active'}
@@ -106,40 +106,40 @@ export default function LicenseSettingsPage() {
         )}
       </div>
 
-      {needsKeyEntry && (
-        <div className="bg-white rounded-xl border border-steel-200 p-6">
-          <h2 className="text-sm font-semibold text-steel-800 mb-1">
-            {status?.reactivation_needed && !expired ? 'Entrer la nouvelle clé' : 'Renouveler la licence'}
-          </h2>
-          <p className="text-xs text-steel-500 mb-4">
-            Entrez le code école et la nouvelle clé de licence fournis par l'équipe ScolaDesk. Une connexion internet est requise.
-          </p>
+      <div className="bg-white rounded-xl border border-steel-200 p-6">
+        <h2 className="text-sm font-semibold text-steel-800 mb-1">
+          {status?.reactivation_needed && !expired ? 'Entrer la nouvelle clé'
+            : expired ? 'Renouveler la licence'
+            : 'Gérer votre licence'}
+        </h2>
+        <p className="text-xs text-steel-500 mb-4">
+          Entrez le code école et la clé de licence fournis par l'équipe ScolaDesk. Une connexion internet est requise.
+        </p>
 
-          {done ? (
-            <p className="text-sm text-brand font-medium">Licence réactivée — rechargement...</p>
-          ) : (
-            <form onSubmit={handleActivate} className="space-y-3 max-w-sm">
-              <div>
-                <label className="block text-xs text-steel-500 mb-1">Code école</label>
-                <input type="text" required value={schoolCode} onChange={e => setSchoolCode(e.target.value.toUpperCase())}
-                  placeholder="CC-YYYY-XXXX"
-                  className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm font-mono text-center focus:outline-none focus:border-brand" />
-              </div>
-              <div>
-                <label className="block text-xs text-steel-500 mb-1">Clé de licence</label>
-                <input type="text" required value={licenseKey} onChange={e => setLicenseKey(formatKey(e.target.value))}
-                  placeholder="SDLK-YYYY-XXXX-XXXX-XXXX"
-                  className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm font-mono text-center focus:outline-none focus:border-brand" />
-              </div>
-              {error && <p className="text-red-500 text-xs">{error}</p>}
-              <button type="submit" disabled={loading || !schoolCode.trim() || licenseKey.replace(/-/g, '').length < 20}
-                className="w-full py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
-                {loading ? 'Activation...' : 'Activer'}
-              </button>
-            </form>
-          )}
-        </div>
-      )}
+        {done ? (
+          <p className="text-sm text-brand font-medium">Licence réactivée — rechargement...</p>
+        ) : (
+          <form onSubmit={handleActivate} className="space-y-3 max-w-sm">
+            <div>
+              <label className="block text-xs text-steel-500 mb-1">Code école</label>
+              <input type="text" required value={schoolCode} onChange={e => setSchoolCode(e.target.value.toUpperCase())}
+                placeholder="CC-YYYY-XXXX"
+                className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm font-mono text-center focus:outline-none focus:border-brand" />
+            </div>
+            <div>
+              <label className="block text-xs text-steel-500 mb-1">Clé de licence</label>
+              <input type="text" required value={licenseKey} onChange={e => setLicenseKey(formatKey(e.target.value))}
+                placeholder="SDLK-YYYY-XXXX-XXXX-XXXX"
+                className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm font-mono text-center focus:outline-none focus:border-brand" />
+            </div>
+            {error && <p className="text-red-500 text-xs">{error}</p>}
+            <button type="submit" disabled={loading || !schoolCode.trim() || licenseKey.replace(/-/g, '').length < 20}
+              className="w-full py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
+              {loading ? 'Activation...' : 'Activer'}
+            </button>
+          </form>
+        )}
+      </div>
     </div>
   )
 }
