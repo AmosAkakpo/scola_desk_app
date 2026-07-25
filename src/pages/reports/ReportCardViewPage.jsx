@@ -5,14 +5,23 @@ import api from '../../utils/api'
 export function BulletinContent({ d }) {
   const sem = d.semester
   const semLabel = `${sem === 1 ? '1er' : sem === 2 ? '2ème' : '3ème'} Trimestre`
+  // Logo presence used to be read from d.school.logo_path, frozen into the
+  // snapshot at generation time -- a bulletin generated before the school
+  // ever uploaded a logo kept showing the placeholder forever, even after
+  // regenerating OTHER classrooms/semesters (owner report 2026-07-23).
+  // /api/settings/school-logo already always serves whatever the CURRENT
+  // logo is (or 404s if there isn't one), so just try loading it directly
+  // and fall back to the placeholder on error -- no stale snapshot data
+  // involved at all, works identically for old and new bulletins.
+  const [logoFailed, setLogoFailed] = useState(false)
   return (
     <div className="bg-white mx-auto print:m-0 print:shadow-none shadow-lg" style={{ width: '210mm', minHeight: '297mm', padding: '10mm 12mm', fontSize: '10pt', display: 'flex', flexDirection: 'column' }}>
 
         {/* Header */}
         <div className="flex items-start justify-between mb-3" style={{ borderBottom: '2px solid #000', paddingBottom: '6px' }}>
           <div className="w-20 h-20 flex items-center justify-center">
-            {d.school.logo_path ? (
-              <img src={`/api/settings/school-logo?t=${d.school.logo_path ? encodeURIComponent(d.school.logo_path) : 'logo'}`} alt="" className="max-w-full max-h-full object-contain" />
+            {!logoFailed ? (
+              <img src="/api/settings/school-logo" alt="" className="max-w-full max-h-full object-contain" onError={() => setLogoFailed(true)} />
             ) : (
               <div className="w-14 h-14 border-2 border-steel-400 rounded-lg flex items-center justify-center">
                 <span className="text-steel-400 text-xl font-bold">S</span>

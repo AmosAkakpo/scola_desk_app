@@ -6,6 +6,30 @@ const { getDb, getDataDir } = require('../db/init')
 const { requireAuth } = require('../middleware/requireAuth')
 const { requirePermission } = require('../middleware/requirePermission')
 
+// Detects real image format from magic bytes -- the upload input accepts
+// any image/* (owner report 2026-07-23: logo not showing on some
+// bulletins), so a JPEG/WEBP/GIF logo was being saved as "school-logo.png"
+// and served with a hardcoded Content-Type: image/png. Browsers often
+// render it anyway via content sniffing, but not reliably everywhere --
+// this makes the stored extension and served header always match the
+// actual bytes.
+const IMAGE_SIGNATURES = [
+  { ext: 'png', mime: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47] },
+  { ext: 'jpg', mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
+  { ext: 'gif', mime: 'image/gif', bytes: [0x47, 0x49, 0x46, 0x38] },
+  { ext: 'webp', mime: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] }, // RIFF, WEBP checked separately below
+]
+
+function detectImageFormat(buf) {
+  for (const sig of IMAGE_SIGNATURES) {
+    if (buf.length >= sig.bytes.length && sig.bytes.every((b, i) => buf[i] === b)) {
+      if (sig.ext === 'webp' && buf.slice(8, 12).toString('ascii') !== 'WEBP') continue
+      return sig
+    }
+  }
+  return null
+}
+
 // ─── GET /api/settings/school-logo — Serve logo (no auth — img tags can't send JWT) ──
 router.get('/school-logo', (req, res) => {
   const db = getDb()
@@ -13,7 +37,9 @@ router.get('/school-logo', (req, res) => {
   if (!logoPath) return res.status(404).end()
   const fullPath = path.join(getDataDir(), logoPath)
   if (!fs.existsSync(fullPath)) return res.status(404).end()
-  res.setHeader('Content-Type', 'image/png')
+  const ext = path.extname(logoPath).slice(1).toLowerCase()
+  const mime = IMAGE_SIGNATURES.find(s => s.ext === ext)?.mime || 'image/png'
+  res.setHeader('Content-Type', mime)
   res.setHeader('Cache-Control', 'no-cache')
   fs.createReadStream(fullPath).pipe(res)
 })
@@ -176,14 +202,27 @@ router.get('/benin-flag', (req, res) => {
 // ─── POST /api/settings/school-logo — Upload logo ───────────
 router.post('/school-logo', express.raw({ type: '*/*', limit: '5mb' }), (req, res) => {
   try {
+    const format = detectImageFormat(req.body)
+    if (!format) {
+      return res.status(400).json({ error: 'INVALID_IMAGE', message: 'Format d\'image non reconnu (PNG, JPEG, GIF ou WEBP requis)' })
+    }
+
     const logoDir = path.join(getDataDir(), 'logos')
     if (!fs.existsSync(logoDir)) fs.mkdirSync(logoDir, { recursive: true })
 
-    const filename = 'school-logo.png'
+    const db = getDb()
+    // Previous upload may have used a different extension -- remove it so
+    // logos/ never accumulates orphaned files across format changes.
+    const existing = db.prepare("SELECT value FROM app_settings WHERE key = 'school_logo_path'").get()?.value
+    if (existing) {
+      const oldPath = path.join(getDataDir(), existing)
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath)
+    }
+
+    const filename = `school-logo.${format.ext}`
     const filePath = path.join(logoDir, filename)
     fs.writeFileSync(filePath, req.body)
 
-    const db = getDb()
     db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('school_logo_path', ?, datetime('now'))").run(`logos/${filename}`)
 
     return res.json({ success: true, path: `logos/${filename}` })
