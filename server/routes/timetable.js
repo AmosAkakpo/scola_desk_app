@@ -70,11 +70,22 @@ router.get('/class/:classroomId', requirePermission('students.view'), (req, res)
   const classroom = db.prepare('SELECT id, label, level_id, serie_id FROM classrooms WHERE id = ? AND is_deleted = 0').get(req.params.classroomId)
   if (!classroom) return res.status(404).json({ error: 'NOT_FOUND' })
 
+  // teacher_name/teacher_id are derived LIVE from teacher_schedule, not
+  // read from the entry's own (frozen-at-creation) teacher_id column --
+  // owner report 2026-07-25: adding a slot for a subject with no teacher
+  // assigned yet silently never showed up in that teacher's view once one
+  // WAS assigned later, since the stored column never got updated after
+  // the fact. Deriving live means an assignment change instantly applies
+  // to every past and future slot, both sides, with nothing to go stale.
   const entries = db.prepare(`
-    SELECT e.*, s.name AS subject_name, t.full_name AS teacher_name
+    SELECT e.id, e.academic_year_id, e.classroom_id, e.day_of_week, e.start_time, e.end_time, e.subject_id, e.room,
+      s.name AS subject_name,
+      (SELECT ts.teacher_id FROM teacher_schedule ts
+        WHERE ts.classroom_id = e.classroom_id AND ts.subject_id = e.subject_id AND ts.academic_year_id = e.academic_year_id LIMIT 1) AS teacher_id,
+      (SELECT t.full_name FROM teacher_schedule ts JOIN teachers t ON t.id = ts.teacher_id
+        WHERE ts.classroom_id = e.classroom_id AND ts.subject_id = e.subject_id AND ts.academic_year_id = e.academic_year_id LIMIT 1) AS teacher_name
     FROM timetable_entries e
     JOIN subjects s ON s.id = e.subject_id
-    LEFT JOIN teachers t ON t.id = e.teacher_id
     WHERE e.classroom_id = ? AND e.academic_year_id = ?
     ORDER BY e.day_of_week, e.start_time
   `).all(classroom.id, yr || 0)
@@ -102,14 +113,24 @@ router.get('/teacher/:teacherId', requirePermission('students.view'), (req, res)
   const teacher = db.prepare('SELECT id, full_name FROM teachers WHERE id = ? AND is_deleted = 0').get(req.params.teacherId)
   if (!teacher) return res.status(404).json({ error: 'NOT_FOUND' })
 
+  // Same live-derivation as GET /class -- filters on teacher_schedule's
+  // CURRENT assignment for each slot's (classroom, subject), not the
+  // entry's own frozen teacher_id column. A slot only appears here if
+  // this teacher is presently assigned to that classroom+subject.
   const entries = db.prepare(`
-    SELECT e.*, s.name AS subject_name, c.label AS classroom_label
+    SELECT e.id, e.academic_year_id, e.classroom_id, e.day_of_week, e.start_time, e.end_time, e.subject_id, e.room,
+      s.name AS subject_name, c.label AS classroom_label
     FROM timetable_entries e
     JOIN subjects s ON s.id = e.subject_id
     JOIN classrooms c ON c.id = e.classroom_id
-    WHERE e.teacher_id = ? AND e.academic_year_id = ?
+    WHERE e.academic_year_id = ?
+      AND EXISTS (
+        SELECT 1 FROM teacher_schedule ts
+        WHERE ts.classroom_id = e.classroom_id AND ts.subject_id = e.subject_id
+          AND ts.academic_year_id = e.academic_year_id AND ts.teacher_id = ?
+      )
     ORDER BY e.day_of_week, e.start_time
-  `).all(teacher.id, yr || 0)
+  `).all(yr || 0, teacher.id)
 
   return res.json({ teacher, entries })
 })
@@ -139,12 +160,21 @@ router.post('/entry', requirePermission('students.edit'), (req, res) => {
     }
   }
 
-  // Teacher conflict: same teacher in another class at an overlapping time that day
+  // Teacher conflict: same teacher in another class at an overlapping time
+  // that day -- matched against OTHER entries' current live assignment,
+  // not their own frozen teacher_id column (same reasoning as the GET
+  // endpoints above: an assignment made after those entries were created
+  // must still be caught here).
   if (teacherId) {
     const tDay = db.prepare(`
       SELECT e.start_time, e.end_time, c.label FROM timetable_entries e JOIN classrooms c ON c.id = e.classroom_id
-      WHERE e.teacher_id = ? AND e.academic_year_id = ? AND e.day_of_week = ?
-    `).all(teacherId, yr, day_of_week)
+      WHERE e.academic_year_id = ? AND e.day_of_week = ?
+        AND EXISTS (
+          SELECT 1 FROM teacher_schedule ts
+          WHERE ts.classroom_id = e.classroom_id AND ts.subject_id = e.subject_id
+            AND ts.academic_year_id = e.academic_year_id AND ts.teacher_id = ?
+        )
+    `).all(yr, day_of_week, teacherId)
     for (const e of tDay) {
       if (overlaps(start_time, end_time, e.start_time, e.end_time)) {
         const tName = db.prepare('SELECT full_name FROM teachers WHERE id = ?').get(teacherId)?.full_name || 'L\'enseignant'
@@ -182,15 +212,24 @@ router.put('/entry/:id', requirePermission('students.edit'), (req, res) => {
       return res.status(409).json({ error: 'CLASS_BUSY', message: `Créneau déjà occupé (${e.start_time}–${e.end_time}) pour cette classe` })
     }
   }
-  // Teacher conflict (ignore self)
-  if (entry.teacher_id) {
+  // Teacher conflict (ignore self) -- current assignment for this slot's
+  // (classroom, subject), same live derivation as the GET endpoints, not
+  // the entry's own frozen teacher_id column.
+  const currentTeacherId = db.prepare('SELECT teacher_id FROM teacher_schedule WHERE classroom_id = ? AND subject_id = ? AND academic_year_id = ? LIMIT 1')
+    .get(entry.classroom_id, entry.subject_id, yr)?.teacher_id || null
+  if (currentTeacherId) {
     const tDay = db.prepare(`
       SELECT e.start_time, e.end_time, c.label FROM timetable_entries e JOIN classrooms c ON c.id = e.classroom_id
-      WHERE e.teacher_id = ? AND e.academic_year_id = ? AND e.day_of_week = ? AND e.id != ?
-    `).all(entry.teacher_id, yr, day_of_week, entry.id)
+      WHERE e.academic_year_id = ? AND e.day_of_week = ? AND e.id != ?
+        AND EXISTS (
+          SELECT 1 FROM teacher_schedule ts
+          WHERE ts.classroom_id = e.classroom_id AND ts.subject_id = e.subject_id
+            AND ts.academic_year_id = e.academic_year_id AND ts.teacher_id = ?
+        )
+    `).all(yr, day_of_week, entry.id, currentTeacherId)
     for (const e of tDay) {
       if (overlaps(start_time, end_time, e.start_time, e.end_time)) {
-        const tName = db.prepare('SELECT full_name FROM teachers WHERE id = ?').get(entry.teacher_id)?.full_name || 'L\'enseignant'
+        const tName = db.prepare('SELECT full_name FROM teachers WHERE id = ?').get(currentTeacherId)?.full_name || 'L\'enseignant'
         return res.status(409).json({ error: 'TEACHER_BUSY', message: `${tName} est déjà en cours en ${e.label} (${e.start_time}–${e.end_time})` })
       }
     }
