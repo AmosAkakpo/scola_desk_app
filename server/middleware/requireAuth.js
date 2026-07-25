@@ -63,17 +63,22 @@ async function requireAuth(req, res, next) {
 
         delete user.session_id // internal-only, never needs to leave this middleware
 
-        // Load permissions for this user's role
-        // Admin gets all permissions without DB lookup
+        // Load permissions -- per-USER grants (user_permissions), not the
+        // fixed role bundle (owner request 2026-07-25: admin assigns each
+        // person's page access individually, editable anytime, instead of
+        // being locked to whatever "secretary"/"accountant" happens to
+        // include). role_id/role_name remain a display label only.
+        // Admin gets all permissions without DB lookup -- fixed, never
+        // customizable, matches the owner's "admin stays fixed" call.
         if (user.role_name === 'admin') {
             user.permissions = ['*']
         } else {
             const perms = db.prepare(`
         SELECT p.code
-        FROM role_permissions rp
-        JOIN permissions p ON p.id = rp.permission_id
-        WHERE rp.role_id = ?
-      `).all(user.role_id)
+        FROM user_permissions up
+        JOIN permissions p ON p.id = up.permission_id
+        WHERE up.user_id = ?
+      `).all(user.id)
             user.permissions = perms.map(p => p.code)
         }
 

@@ -32,7 +32,34 @@ router.get('/', (req, res) => {
     WHERE u.is_deleted = 0
     ORDER BY (r.name = 'admin') DESC, u.full_name
   `).all()
+
+  // Per-user permission codes (owner request 2026-07-25: access is
+  // individually editable now, not just whatever the role bundle says) --
+  // admin never has rows here, always full access, not worth a query.
+  const permStmt = db.prepare(`
+    SELECT p.code FROM user_permissions up JOIN permissions p ON p.id = up.permission_id WHERE up.user_id = ?
+  `)
+  for (const u of users) {
+    u.permissions = u.role_name === 'admin' ? ['*'] : permStmt.all(u.id).map(p => p.code)
+  }
+
   return res.json({ users, tier: getLicenseTier(db) })
+})
+
+// ─── GET /api/users/permissions/catalog — page groups for the checklist ─
+// One entry = one checkbox in the admin UI = one or more permission codes
+// granted/revoked together. proOnly groups are still filtered client-side
+// by license tier same as the nav itself.
+router.get('/permissions/catalog', (req, res) => {
+  return res.json({
+    groups: [
+      { key: 'academic', label: 'Élèves, enseignants & classes', codes: ['students.view', 'students.edit'] },
+      { key: 'grades', label: 'Notes', codes: ['grades.view', 'grades.edit'] },
+      { key: 'reports', label: 'Bulletins', codes: ['reports.view', 'reports.generate'] },
+      { key: 'attendance', label: 'Présences', codes: ['attendance.view', 'attendance.edit'], proOnly: true },
+      { key: 'finance', label: 'Finance', codes: ['finance.view', 'finance.edit'], proOnly: true },
+    ],
+  })
 })
 
 // ─── POST /api/users — Create a secretary or accountant account ─
@@ -41,7 +68,7 @@ router.get('/', (req, res) => {
 // code flow elsewhere.
 router.post('/', async (req, res) => {
   try {
-    const { full_name, username, password, role } = req.body
+    const { full_name, username, password, role, permissions } = req.body
     if (!full_name?.trim() || !username?.trim() || !password || !role) {
       return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Tous les champs sont requis' })
     }
@@ -84,16 +111,75 @@ router.post('/', async (req, res) => {
     `).run(generateUserUID(prefix), generateShortUID('U'), full_name.trim(), username.trim().toLowerCase(), passwordHash, roleRow.id)
 
     const newUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim().toLowerCase())
+
+    // Custom permission set if the admin picked one (array of codes from
+    // the checklist); otherwise fall back to the role's default bundle so
+    // creating an account still works sensibly with zero extra clicks.
+    if (Array.isArray(permissions) && permissions.length > 0) {
+      const validCodes = new Set(db.prepare('SELECT code FROM permissions').all().map(p => p.code))
+      const insertPerm = db.prepare(`
+        INSERT OR IGNORE INTO user_permissions (user_id, permission_id)
+        SELECT ?, id FROM permissions WHERE code = ?
+      `)
+      for (const code of permissions) {
+        if (validCodes.has(code)) insertPerm.run(newUser.id, code)
+      }
+    } else {
+      db.prepare(`
+        INSERT OR IGNORE INTO user_permissions (user_id, permission_id)
+        SELECT ?, permission_id FROM role_permissions WHERE role_id = ?
+      `).run(newUser.id, roleRow.id)
+    }
+
     db.prepare(`
       INSERT INTO audit_logs (user_id, action, entity_type, entity_id, new_values)
       VALUES (?, 'USER_CREATED', 'user', ?, ?)
-    `).run(req.user.id, String(newUser.id), JSON.stringify({ role, created_by: req.user.id }))
+    `).run(req.user.id, String(newUser.id), JSON.stringify({ role, permissions, created_by: req.user.id }))
 
     return res.status(201).json({ success: true })
   } catch (err) {
     console.error('[USERS CREATE]', err)
     return res.status(500).json({ error: 'SERVER_ERROR', message: 'Erreur serveur' })
   }
+})
+
+// ─── PUT /api/users/:id/permissions — edit page access, anytime ─
+// Owner request 2026-07-25: access isn't fixed at creation -- admin can
+// come back and add/remove pages for any account whenever needed.
+router.put('/:id/permissions', (req, res) => {
+  const db = getDb()
+  const user = db.prepare(`
+    SELECT u.id, r.name AS role_name FROM users u
+    JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.is_deleted = 0
+  `).get(req.params.id)
+  if (!user) return res.status(404).json({ error: 'NOT_FOUND' })
+  if (user.role_name === 'admin') {
+    return res.status(403).json({ error: 'CANNOT_MODIFY_ADMIN', message: "L'accès administrateur est fixe, non modifiable" })
+  }
+
+  const { permissions } = req.body
+  if (!Array.isArray(permissions)) {
+    return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Liste de permissions requise' })
+  }
+
+  const validCodes = new Set(db.prepare('SELECT code FROM permissions').all().map(p => p.code))
+  db.transaction(() => {
+    db.prepare('DELETE FROM user_permissions WHERE user_id = ?').run(user.id)
+    const insertPerm = db.prepare(`
+      INSERT OR IGNORE INTO user_permissions (user_id, permission_id)
+      SELECT ?, id FROM permissions WHERE code = ?
+    `)
+    for (const code of permissions) {
+      if (validCodes.has(code)) insertPerm.run(user.id, code)
+    }
+  })()
+
+  db.prepare(`
+    INSERT INTO audit_logs (user_id, action, entity_type, entity_id, new_values)
+    VALUES (?, 'USER_PERMISSIONS_UPDATED', 'user', ?, ?)
+  `).run(req.user.id, String(user.id), JSON.stringify({ permissions }))
+
+  return res.json({ success: true })
 })
 
 // ─── PATCH /api/users/:id/toggle-active ──────────────────────

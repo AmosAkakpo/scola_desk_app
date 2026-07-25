@@ -110,14 +110,14 @@ router.post('/login', async (req, res) => {
       VALUES (?, 'LOGIN_SUCCESS', 'user', ?, ?)
     `).run(user.id, String(user.id), req.ip)
 
-        // Load permissions
+        // Load permissions -- per-user grants, same as requireAuth.js.
         let permissions = ['*']
         if (user.role_name !== 'admin') {
             const perms = db.prepare(`
-                SELECT p.code FROM role_permissions rp
-                JOIN permissions p ON p.id = rp.permission_id
-                WHERE rp.role_id = ?
-            `).all(user.role_id)
+                SELECT p.code FROM user_permissions up
+                JOIN permissions p ON p.id = up.permission_id
+                WHERE up.user_id = ?
+            `).all(user.id)
             permissions = perms.map(p => p.code)
         }
 

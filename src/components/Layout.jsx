@@ -88,38 +88,45 @@ function LicenseExpiryBanner({ expiry }) {
 //   - Mon abonnement      → ALL roles, ALL tiers (locked constraint)
 //   - Présences           → secretary records (PRO feature)
 //   - Paramètres          → admin only (SETTINGS_ITEM below)
+// Nav visibility is driven ENTIRELY by permission codes now (owner request
+// 2026-07-25: admin assigns each user's page access individually, editable
+// anytime, instead of being locked to a fixed "secretary"/"accountant"
+// bundle). The old hardcoded `roles: [...]` arrays used to hide items from
+// accountants/secretaries regardless of their actual granted permissions --
+// with per-user custom access that would silently contradict what the
+// admin just configured, so they're gone; `perm` alone decides visibility.
 const NAV_GROUPS = [
   {
     label: null,
     items: [
-      // Pulls from /api/grades/dashboard/stats (students.view) -- accountants
-      // don't have that permission, so this 403s and just errors for them
-      // (owner report 2026-07-18). They have their own Finance dashboard.
-      { to: '/dashboard', label: 'Tableau de bord', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', perm: null, roles: ['secretary'] },
+      // Same permission /api/grades/dashboard/stats itself requires --
+      // whoever doesn't have it gets a working page (Finance dashboard,
+      // etc.) instead of this one 403ing (owner report 2026-07-18).
+      { to: '/dashboard', label: 'Tableau de bord', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', perm: 'students.view' },
       { to: '/users', label: 'Utilisateurs', icon: 'M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a4 4 0 10-4-4', perm: 'admin' },
     ],
   },
   {
     label: 'Gestion académique',
     items: [
-      { to: '/students', label: 'Élèves', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z', perm: 'students.view', roles: ['secretary'] },
-      { to: '/teachers', label: 'Enseignants', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z', perm: 'students.view', roles: ['secretary'] },
-      { to: '/classrooms', label: 'Classes', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4', perm: 'students.view', roles: ['secretary'] },
-      { to: '/timetable', label: 'Emploi du temps', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', perm: 'students.view', roles: ['secretary'] },
-      { to: '/finance/attendance', label: 'Présences', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', perm: 'attendance.view', roles: ['secretary'], proOnly: true },
-      { to: '/grades', label: 'Notes', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 5h6m-6 4h4', perm: 'grades.view', roles: ['secretary'] },
-      { to: '/report-cards', label: 'Bulletins', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', perm: 'reports.view', roles: ['secretary'] },
+      { to: '/students', label: 'Élèves', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z', perm: 'students.view' },
+      { to: '/teachers', label: 'Enseignants', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z', perm: 'students.view' },
+      { to: '/classrooms', label: 'Classes', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4', perm: 'students.view' },
+      { to: '/timetable', label: 'Emploi du temps', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', perm: 'students.view' },
+      { to: '/finance/attendance', label: 'Présences', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', perm: 'attendance.view', proOnly: true },
+      { to: '/grades', label: 'Notes', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 5h6m-6 4h4', perm: 'grades.view' },
+      { to: '/report-cards', label: 'Bulletins', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', perm: 'reports.view' },
     ],
   },
   {
     label: 'Finance',
     items: [
-      { to: '/finance', label: 'Tableau de bord', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', perm: 'finance.view', end: true, roles: ['accountant'], proOnly: true },
-      { to: '/finance/tuition', label: 'Paiements scolarité', icon: 'M3 10h18M7 15h2m2 0h6M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z', perm: 'finance.view', roles: ['accountant'], proOnly: true },
-      { to: '/finance/salaries', label: 'Salaires', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', perm: 'finance.view', roles: ['accountant'], proOnly: true },
-      { to: '/finance/expenses', label: 'Dépenses', icon: 'M20 12H4M20 12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4a2 2 0 012-2M20 12V8a2 2 0 00-2-2H6a2 2 0 00-2 2v4', perm: 'finance.view', roles: ['accountant'], proOnly: true },
-      { to: '/finance/report', label: 'Rapport financier', icon: 'M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z', perm: 'finance.view', roles: ['accountant'], proOnly: true },
-      { to: '/finance/settings', label: 'Frais & catégories', icon: 'M9 7h6m0 10v-3m-3 3v-6m-3 6v-9m12 9V7a2 2 0 00-2-2H6a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2z', perm: 'finance.edit', roles: ['accountant'], proOnly: true },
+      { to: '/finance', label: 'Tableau de bord', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', perm: 'finance.view', end: true, proOnly: true },
+      { to: '/finance/tuition', label: 'Paiements scolarité', icon: 'M3 10h18M7 15h2m2 0h6M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z', perm: 'finance.view', proOnly: true },
+      { to: '/finance/salaries', label: 'Salaires', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', perm: 'finance.view', proOnly: true },
+      { to: '/finance/expenses', label: 'Dépenses', icon: 'M20 12H4M20 12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4a2 2 0 012-2M20 12V8a2 2 0 00-2-2H6a2 2 0 00-2 2v4', perm: 'finance.view', proOnly: true },
+      { to: '/finance/report', label: 'Rapport financier', icon: 'M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z', perm: 'finance.view', proOnly: true },
+      { to: '/finance/settings', label: 'Frais & catégories', icon: 'M9 7h6m0 10v-3m-3 3v-6m-3 6v-9m12 9V7a2 2 0 00-2-2H6a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2z', perm: 'finance.edit', proOnly: true },
       { to: '/finance/subscription', label: 'Mon abonnement', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', perm: null },
     ],
   },
@@ -328,8 +335,6 @@ export default function Layout({ schoolInfo }) {
     items: group.items.filter(item => {
       // Tier gate: PRO-only items disappear entirely on STANDARD installs
       if (item.proOnly && !isPro) return false
-      // Role gate: admin sees everything; others need to be in the item's roles
-      if (item.roles && user?.role !== 'admin' && !item.roles.includes(user?.role)) return false
       if (!item.perm) return true
       if (item.perm === 'admin') return user?.role === 'admin'
       return hasPermission(item.perm)

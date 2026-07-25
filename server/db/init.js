@@ -233,6 +233,10 @@ function runMigrations() {
         {
             version: '019_backup_log',
             run: require('./migration/019_backup_log').migration019
+        },
+        {
+            version: '020_user_permissions',
+            run: require('./migration/020_user_permissions').migration020
         }
     ]
 
