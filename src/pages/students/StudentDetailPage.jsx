@@ -52,6 +52,7 @@ export default function StudentDetailPage() {
   const [conduiteSaving, setConduiteSaving] = useState(false)
   const [showSaveInfoConfirm, setShowSaveInfoConfirm] = useState(false)
   const [savingInfo, setSavingInfo] = useState(false)
+  const [saveConflict, setSaveConflict] = useState(false)
   const [guardianToDelete, setGuardianToDelete] = useState(null)
   const [deletingGuardian, setDeletingGuardian] = useState(false)
 
@@ -73,11 +74,19 @@ export default function StudentDetailPage() {
 
   async function saveEdit() {
     setSavingInfo(true)
+    setSaveConflict(false)
     try {
-      await api.put(`/api/students/${id}`, editForm)
+      await api.put(`/api/students/${id}`, { ...editForm, expected_updated_at: student.updated_at })
       setShowSaveInfoConfirm(false)
       setEditing(false)
       fetchData()
+    } catch (err) {
+      if (err.response?.status === 409) {
+        setSaveConflict(true)
+        setShowSaveInfoConfirm(false)
+      } else {
+        throw err
+      }
     } finally {
       setSavingInfo(false)
     }
@@ -196,6 +205,13 @@ export default function StudentDetailPage() {
             </div>
           )}
         </div>
+        {saveConflict && (
+          <div className="mb-4 px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700 flex items-center justify-between gap-3">
+            <span>Cet élève a été modifié par un autre utilisateur entre-temps. Rechargez avant de réessayer.</span>
+            <button onClick={() => { setSaveConflict(false); setEditing(false); fetchData() }}
+              className="text-xs font-medium text-orange-700 underline shrink-0">Recharger</button>
+          </div>
+        )}
         {!editing ? (
           <div className="grid grid-cols-3 gap-4 text-sm">
             <div><p className="text-steel-400 text-xs">Nom complet</p><p className="text-steel-800 font-medium">{student.full_name}</p></div>

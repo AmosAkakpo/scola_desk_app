@@ -184,14 +184,24 @@ router.get('/:id/bulletin-history', requirePermission('reports.view'), (req, res
 // ─── PUT /api/students/:id — Update personal info ───────────
 router.put('/:id', requirePermission('students.edit'), (req, res) => {
   const db = getDb()
-  const { full_name, birth_date, birth_place, gender, national_student_number } = req.body
-  const student = db.prepare('SELECT id FROM students WHERE id = ? AND is_deleted = 0').get(req.params.id)
+  const { full_name, birth_date, birth_place, gender, national_student_number, expected_updated_at } = req.body
+  const student = db.prepare('SELECT id, updated_at FROM students WHERE id = ? AND is_deleted = 0').get(req.params.id)
   if (!student) return res.status(404).json({ error: 'NOT_FOUND' })
 
-  db.prepare(`
+  if (expected_updated_at && expected_updated_at !== student.updated_at) {
+    const current = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id)
+    return res.status(409).json({ error: 'CONFLICT', message: 'Cet élève a été modifié par un autre utilisateur depuis votre dernière lecture', current })
+  }
+
+  const result = db.prepare(`
     UPDATE students SET full_name = ?, birth_date = ?, birth_place = ?, gender = ?,
-    national_student_number = ?, updated_at = datetime('now') WHERE id = ?
-  `).run(full_name?.trim(), birth_date || null, birth_place || null, gender || null, national_student_number || null, req.params.id)
+    national_student_number = ?, updated_at = datetime('now') WHERE id = ? AND updated_at = ?
+  `).run(full_name?.trim(), birth_date || null, birth_place || null, gender || null, national_student_number || null, req.params.id, student.updated_at)
+
+  if (result.changes === 0) {
+    const current = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id)
+    return res.status(409).json({ error: 'CONFLICT', message: 'Cet élève a été modifié par un autre utilisateur depuis votre dernière lecture', current })
+  }
 
   return res.json({ success: true })
 })
