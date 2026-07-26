@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../../utils/api'
+import ReceiptHeader from '../../components/ReceiptHeader'
 
 function formatXOF(n) {
   if (n === null || n === undefined) return '—'
@@ -64,7 +65,10 @@ export default function TeacherSalaryPage() {
     if (!printData) return
     const style = document.createElement('style')
     style.id = 'scola-print-style'
-    style.textContent = '@media print { @page { size: A4 portrait; margin: 0; } body * { visibility: hidden !important; } #scola-print-content { visibility: visible !important; position: fixed !important; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; } #scola-print-content * { visibility: visible !important; } }'
+    // Salary slip is short -- printed normal A4 portrait but capped to
+    // roughly the top half (see SalaryReceipt's height below), leaving the
+    // bottom half blank so the same sheet can go through the printer again.
+    style.textContent = '@media print { @page { size: A4 portrait; margin: 8mm; } body * { visibility: hidden !important; } #scola-print-content { visibility: visible !important; position: fixed !important; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; } #scola-print-content * { visibility: visible !important; } }'
     document.head.appendChild(style)
     return () => { document.getElementById('scola-print-style')?.remove() }
   }, [printData])
@@ -348,31 +352,19 @@ function SalaryReceipt({ data }) {
   const school = data.school || {}
   const p = data.data || {}
   const fmtN = n => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0)) + ' F CFA'
-  const cellH = { padding: '6px 10px', border: '1px solid #ccc', backgroundColor: '#f0f0f0', fontWeight: 'bold', width: '22%', fontSize: 11, whiteSpace: 'nowrap' }
-  const cellV = { padding: '6px 10px', border: '1px solid #ccc', fontSize: 12 }
+  const cellH = { padding: '3px 6px', border: '1px solid #ccc', backgroundColor: '#f0f0f0', fontWeight: 'bold', width: '22%', fontSize: 9, whiteSpace: 'nowrap' }
+  const cellV = { padding: '3px 6px', border: '1px solid #ccc', fontSize: 10 }
 
   const monthLabel = p.month
     ? new Date(p.month + '-02').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
     : '—'
 
   return (
-    <div style={{ fontFamily: 'Arial, sans-serif', padding: '12mm 16mm', fontSize: 12, color: '#000', minHeight: '297mm', boxSizing: 'border-box' }}>
-      {/* School header */}
-      <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: 10, marginBottom: 16 }}>
-        <p style={{ fontWeight: 'bold', fontSize: 18, margin: '0 0 3px' }}>{school.school_name || 'Établissement scolaire'}</p>
-        {(school.city || school.country) && (
-          <p style={{ fontSize: 11, margin: 0, color: '#555' }}>{[school.city, school.country].filter(Boolean).join(' — ')}</p>
-        )}
-      </div>
-
-      {/* Title */}
-      <div style={{ textAlign: 'center', margin: '16px 0 20px' }}>
-        <p style={{ fontWeight: 'bold', fontSize: 16, letterSpacing: 3, margin: 0, textTransform: 'uppercase' }}>Reçu de Salaire</p>
-        <p style={{ fontSize: 13, margin: '6px 0 0' }}>N° <strong style={{ fontSize: 14 }}>{p.receipt_number || '—'}</strong></p>
-      </div>
+    <div style={{ fontFamily: 'Arial, sans-serif', fontSize: 10, color: '#000', height: '132mm', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', borderBottom: '1px dashed #999', paddingBottom: 6 }}>
+      <ReceiptHeader school={school} title="Reçu de Salaire" receiptNumber={p.receipt_number} />
 
       {/* Info table */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 6 }}>
         <tbody>
           <tr>
             <td style={cellH}>Enseignant</td>
@@ -416,26 +408,24 @@ function SalaryReceipt({ data }) {
       </table>
 
       {/* Amount */}
-      <div style={{ border: '2px solid #1a1a1a', borderRadius: 4, padding: '20px 24px', textAlign: 'center', margin: '24px 0' }}>
-        <p style={{ fontSize: 12, color: '#555', margin: '0 0 6px' }}>Montant versé</p>
-        <p style={{ fontSize: 28, fontWeight: 'bold', margin: 0 }}>{fmtN(p.amount)}</p>
+      <div style={{ border: '2px solid #1a1a1a', borderRadius: 4, padding: '8px 12px', textAlign: 'center', margin: '6px 0' }}>
+        <p style={{ fontSize: 10, color: '#555', margin: '0 0 3px' }}>Montant versé</p>
+        <p style={{ fontSize: 18, fontWeight: 'bold', margin: 0 }}>{fmtN(p.amount)}</p>
       </div>
 
-      {p.notes && <p style={{ fontSize: 11, color: '#555', marginBottom: 8 }}>Notes : {p.notes}</p>}
+      {p.notes && <p style={{ fontSize: 9, color: '#555', margin: '0 0 4px' }}>Notes : {p.notes}</p>}
 
       {/* Signatures */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 48, fontSize: 12 }}>
-        <div style={{ textAlign: 'center', minWidth: 180 }}>
-          <p style={{ fontWeight: 'bold', marginBottom: 40 }}>Signature de l'enseignant</p>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 4 }}>{p.teacher_name || '________________________'}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'auto', fontSize: 9 }}>
+        <div style={{ textAlign: 'center', minWidth: 120 }}>
+          <p style={{ fontWeight: 'bold', marginBottom: 14 }}>Signature de l'enseignant</p>
+          <div style={{ borderTop: '1px solid #000', paddingTop: 2 }}>{p.teacher_name || '________________'}</div>
         </div>
-        <div style={{ textAlign: 'center', minWidth: 180 }}>
-          <p style={{ fontWeight: 'bold', marginBottom: 40 }}>Cachet et signature</p>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 4 }}>{p.receiver_name || '________________________'}</div>
+        <div style={{ textAlign: 'center', minWidth: 120 }}>
+          <p style={{ fontWeight: 'bold', marginBottom: 14 }}>Cachet et signature</p>
+          <div style={{ borderTop: '1px solid #000', paddingTop: 2 }}>{p.receiver_name || '________________'}</div>
         </div>
       </div>
-
-      <p style={{ marginTop: 'auto', paddingTop: 40, textAlign: 'center', fontSize: 9, color: '#bbb' }}>ScolaDesk — Système de gestion scolaire</p>
     </div>
   )
 }

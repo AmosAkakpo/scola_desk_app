@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import ReceiptHeader from '../../components/ReceiptHeader'
 
 function formatXOF(n) {
   if (n === null || n === undefined) return '—'
@@ -38,7 +39,11 @@ export default function StudentReceiptPage() {
     if (!printModal) return
     const style = document.createElement('style')
     style.id = 'scola-print-style'
-    style.textContent = '@media print { @page { size: A4 portrait; margin: 0; } body * { visibility: hidden !important; } #scola-print-content { visibility: visible !important; position: fixed !important; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; } #scola-print-content * { visibility: visible !important; } }'
+    // Payment receipt is a few lines -- printed normal A4 portrait but the
+    // content itself is capped to roughly the top half (see PrintReceipt's
+    // height below), leaving the bottom half blank so the same sheet can
+    // be run through the printer again for a second receipt.
+    style.textContent = '@media print { @page { size: A4 portrait; margin: 8mm; } body * { visibility: hidden !important; } #scola-print-content { visibility: visible !important; position: fixed !important; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; } #scola-print-content * { visibility: visible !important; } }'
     document.head.appendChild(style)
     return () => { document.getElementById('scola-print-style')?.remove() }
   }, [printModal])
@@ -444,27 +449,14 @@ function PrintReceipt({ data }) {
   const school = data.school || {}
   const p = data.data || {}
   const fmtN = n => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0)) + ' F CFA'
-  const cellH = { padding: '6px 10px', border: '1px solid #ccc', backgroundColor: '#f0f0f0', fontWeight: 'bold', width: '20%', fontSize: 11, whiteSpace: 'nowrap' }
-  const cellV = { padding: '6px 10px', border: '1px solid #ccc', fontSize: 12 }
+  const cellH = { padding: '3px 6px', border: '1px solid #ccc', backgroundColor: '#f0f0f0', fontWeight: 'bold', width: '20%', fontSize: 9, whiteSpace: 'nowrap' }
+  const cellV = { padding: '3px 6px', border: '1px solid #ccc', fontSize: 10 }
   return (
-    <div style={{ fontFamily: 'Arial, sans-serif', padding: '12mm 16mm', fontSize: 12, color: '#000', minHeight: '297mm', boxSizing: 'border-box' }}>
-      {/* School header */}
-      <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: 10, marginBottom: 16 }}>
-        <p style={{ fontWeight: 'bold', fontSize: 18, margin: '0 0 3px' }}>{school.school_name || 'Établissement scolaire'}</p>
-        {(school.city || school.country) && (
-          <p style={{ fontSize: 11, margin: 0, color: '#555' }}>{[school.city, school.country].filter(Boolean).join(' — ')}</p>
-        )}
-        {school.phone && <p style={{ fontSize: 11, margin: '2px 0', color: '#555' }}>Tél : {school.phone}</p>}
-      </div>
-
-      {/* Title + receipt number */}
-      <div style={{ textAlign: 'center', margin: '16px 0 20px' }}>
-        <p style={{ fontWeight: 'bold', fontSize: 16, letterSpacing: 3, margin: 0, textTransform: 'uppercase' }}>Reçu de Paiement</p>
-        <p style={{ fontSize: 13, margin: '6px 0 0' }}>N° <strong style={{ fontSize: 14 }}>{p.receipt_number || '—'}</strong></p>
-      </div>
+    <div style={{ fontFamily: 'Arial, sans-serif', fontSize: 10, color: '#000', height: '132mm', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', borderBottom: '1px dashed #999', paddingBottom: 6 }}>
+      <ReceiptHeader school={school} title="Reçu de Paiement" receiptNumber={p.receipt_number} />
 
       {/* Student + payment meta */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 6 }}>
         <tbody>
           <tr>
             <td style={cellH}>Élève</td>
@@ -494,44 +486,42 @@ function PrintReceipt({ data }) {
       </table>
 
       {/* Fee lines */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 24 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 6 }}>
         <thead>
           <tr style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>
-            <th style={{ padding: '9px 12px', textAlign: 'left', fontSize: 12 }}>Désignation</th>
-            <th style={{ padding: '9px 12px', textAlign: 'right', fontSize: 12, width: '35%' }}>Montant</th>
+            <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10 }}>Désignation</th>
+            <th style={{ padding: '4px 8px', textAlign: 'right', fontSize: 10, width: '35%' }}>Montant</th>
           </tr>
         </thead>
         <tbody>
           {(p.allocations || []).map((a, i) => (
             <tr key={i} style={{ backgroundColor: i % 2 ? '#f7f7f7' : '#fff' }}>
-              <td style={{ padding: '8px 12px', borderBottom: '1px solid #e5e5e5' }}>{a.fee_name}</td>
-              <td style={{ padding: '8px 12px', borderBottom: '1px solid #e5e5e5', textAlign: 'right' }}>{fmtN(a.amount)}</td>
+              <td style={{ padding: '3px 8px', borderBottom: '1px solid #e5e5e5' }}>{a.fee_name}</td>
+              <td style={{ padding: '3px 8px', borderBottom: '1px solid #e5e5e5', textAlign: 'right' }}>{fmtN(a.amount)}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr style={{ backgroundColor: '#f0f0f0', fontWeight: 'bold', borderTop: '2px solid #333' }}>
-            <td style={{ padding: '10px 12px', fontSize: 14 }}>TOTAL PAYÉ</td>
-            <td style={{ padding: '10px 12px', fontSize: 14, textAlign: 'right' }}>{fmtN(p.amount)}</td>
+            <td style={{ padding: '4px 8px', fontSize: 11 }}>TOTAL PAYÉ</td>
+            <td style={{ padding: '4px 8px', fontSize: 11, textAlign: 'right' }}>{fmtN(p.amount)}</td>
           </tr>
         </tfoot>
       </table>
 
-      {p.notes && <p style={{ fontSize: 11, color: '#555', marginBottom: 8 }}>Notes : {p.notes}</p>}
+      {p.notes && <p style={{ fontSize: 9, color: '#555', margin: '0 0 4px' }}>Notes : {p.notes}</p>}
 
       {/* Signature block */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 48, fontSize: 12 }}>
-        <div style={{ textAlign: 'center', minWidth: 180 }}>
-          <p style={{ fontWeight: 'bold', marginBottom: 40 }}>Signature du payeur</p>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 4 }}>{p.payer_name || '________________________'}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'auto', fontSize: 9 }}>
+        <div style={{ textAlign: 'center', minWidth: 120 }}>
+          <p style={{ fontWeight: 'bold', marginBottom: 14 }}>Signature du payeur</p>
+          <div style={{ borderTop: '1px solid #000', paddingTop: 2 }}>{p.payer_name || '________________'}</div>
         </div>
-        <div style={{ textAlign: 'center', minWidth: 180 }}>
-          <p style={{ fontWeight: 'bold', marginBottom: 40 }}>Cachet et signature</p>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 4 }}>{p.receiver_name || '________________________'}</div>
+        <div style={{ textAlign: 'center', minWidth: 120 }}>
+          <p style={{ fontWeight: 'bold', marginBottom: 14 }}>Cachet et signature</p>
+          <div style={{ borderTop: '1px solid #000', paddingTop: 2 }}>{p.receiver_name || '________________'}</div>
         </div>
       </div>
-
-      <p style={{ marginTop: 'auto', paddingTop: 40, textAlign: 'center', fontSize: 9, color: '#bbb' }}>ScolaDesk — Système de gestion scolaire</p>
     </div>
   )
 }
