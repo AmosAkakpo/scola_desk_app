@@ -17,7 +17,11 @@ function getMonthOptions(startDate, endDate) {
   const d = new Date(startDate + 'T00:00:00')
   const end = new Date(endDate + 'T00:00:00')
   while (d <= end) {
-    const val = d.toISOString().slice(0, 7)
+    // toISOString() converts to UTC -- in any timezone ahead of UTC (e.g.
+    // Bénin, UTC+1) local midnight on the 1st becomes 23:00 the PREVIOUS
+    // day in UTC, silently shifting the value back a month. Build the
+    // value from local date parts instead (owner report 2026-07-26).
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
     opts.push({ value: val, label: label.charAt(0).toUpperCase() + label.slice(1) })
     d.setMonth(d.getMonth() + 1)
@@ -37,9 +41,10 @@ export default function TeacherSalaryPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const [month, setMonth] = useState(
-    searchParams.get('pay_period') || new Date().toISOString().slice(0, 7)
-  )
+  const [month, setMonth] = useState(searchParams.get('pay_period') || (() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })())
   // Carried over from the list page when viewing a past (archived) year —
   // read-only there, no payment form.
   const archivedYearId = searchParams.get('academic_year_id') || null

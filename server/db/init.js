@@ -241,6 +241,10 @@ function runMigrations() {
         {
             version: '021_split_page_permissions',
             run: require('./migration/021_split_page_permissions').migration021
+        },
+        {
+            version: '022_dedupe_salaries_category',
+            run: require('./migration/022_dedupe_salaries_category').migration022
         }
     ]
 

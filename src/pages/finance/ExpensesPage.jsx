@@ -7,34 +7,56 @@ function formatXOF(n) {
   return new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' F'
 }
 
-// 'YYYY-MM' → 'Sep 25', 'Jan 26'...
-function monthLabel(m) {
-  const [y, mo] = m.split('-').map(Number)
-  const label = new Date(y, mo - 1, 1).toLocaleDateString('fr-FR', { month: 'short' })
-  return `${label.charAt(0).toUpperCase()}${label.slice(1).replace('.', '')} ${String(y).slice(2)}`
+// Months within [startDate, endDate] inclusive -- same pattern as
+// SalariesPage/TeacherSalaryPage, so picking a month with no expenses yet
+// just shows an empty list instead of hiding it entirely (owner request
+// 2026-07-26: "like in salaire" -- every month of the year is selectable,
+// not just the ones that already have entries).
+function getMonthOptions(startDate, endDate) {
+  if (!startDate || !endDate) return []
+  const opts = []
+  const d = new Date(startDate + 'T00:00:00')
+  const end = new Date(endDate + 'T00:00:00')
+  while (d <= end) {
+    // toISOString() converts to UTC -- in any timezone ahead of UTC (e.g.
+    // Bénin, UTC+1) local midnight on the 1st becomes 23:00 the PREVIOUS
+    // day in UTC, silently shifting the value back a month while the
+    // label (built from the same local date) still read correctly. Build
+    // the value from local date parts instead so it matches what's
+    // actually stored (owner report 2026-07-26: selecting "Juillet" in the
+    // dropdown returned nothing because the value sent was really "06").
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    opts.push({ value: val, label: label.charAt(0).toUpperCase() + label.slice(1) })
+    d.setMonth(d.getMonth() + 1)
+  }
+  return opts
 }
 
 export default function ExpensesPage() {
   const [data, setData] = useState(null)
-  const [months, setMonths] = useState([])
-  const [monthFilter, setMonthFilter] = useState('')
+  const [years, setYears] = useState([])
+  const [month, setMonth] = useState('')
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [catFilter, setCatFilter] = useState('')
   const [yearId, setYearId] = useState(null) // null = current year
 
+  useEffect(() => {
+    api.get('/api/finance/academic-years').then(res => setYears(res.data.years || []))
+  }, [])
+
+  const selectedYear = years.find(y => yearId ? y.id === parseInt(yearId) : y.is_active)
+  const monthOptions = getMonthOptions(selectedYear?.start_date, selectedYear?.end_date)
+
   const load = useCallback(() => {
     setLoading(true)
-    const params = { ...(monthFilter ? { month: monthFilter } : {}), ...(yearId ? { academic_year_id: yearId } : {}) }
-    Promise.all([
-      api.get('/api/finance/expenses', { params }),
-      api.get('/api/finance/expenses/months', { params: yearId ? { academic_year_id: yearId } : {} }),
-    ]).then(([expRes, monthsRes]) => {
-      setData(expRes.data)
-      setMonths(monthsRes.data.months || [])
+    const params = { month, ...(yearId ? { academic_year_id: yearId } : {}) }
+    api.get('/api/finance/expenses', { params }).then(res => {
+      setData(res.data)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [monthFilter, yearId])
+  }, [month, yearId])
 
   useEffect(() => { load() }, [load])
 
@@ -65,37 +87,13 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      {/* Month tabs */}
-      {months.length > 0 && (
-        <div className="flex gap-1.5 mb-4 flex-wrap">
-          <button onClick={() => setMonthFilter('')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${monthFilter === '' ? 'bg-brand text-white border-brand' : 'bg-white text-steel-600 border-steel-200 hover:border-brand hover:text-brand'}`}>
-            Tous
-          </button>
-          {months.map(m => (
-            <button key={m.month} onClick={() => setMonthFilter(m.month)}
-              title={`${m.count} entrée(s) — ${formatXOF(m.total)}`}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${monthFilter === m.month ? 'bg-brand text-white border-brand' : 'bg-white text-steel-600 border-steel-200 hover:border-brand hover:text-brand'}`}>
-              {monthLabel(m.month)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Category totals */}
-      {(data?.totals || []).length > 0 && (
-        <div className="flex gap-3 mb-4 flex-wrap">
-          {data.totals.map(t => (
-            <div key={t.category} className="bg-white rounded-lg border border-steel-200 px-3 py-2">
-              <p className="text-[10px] text-steel-400">{t.category}</p>
-              <p className="text-sm font-semibold text-steel-800">{formatXOF(t.total)}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Filter */}
+      {/* Filters */}
       <div className="flex gap-3 mb-4">
+        <select value={month} onChange={e => setMonth(e.target.value)}
+          className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
+          <option value="">Tous les mois</option>
+          {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
         <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
           <option value="">Toutes les catégories</option>

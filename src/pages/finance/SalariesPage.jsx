@@ -20,7 +20,13 @@ function getMonthOptions(startDate, endDate) {
   const d = new Date(startDate + 'T00:00:00')
   const end = new Date(endDate + 'T00:00:00')
   while (d <= end) {
-    const val = d.toISOString().slice(0, 7)
+    // toISOString() converts to UTC -- in any timezone ahead of UTC (e.g.
+    // Bénin, UTC+1) local midnight on the 1st becomes 23:00 the PREVIOUS
+    // day in UTC, silently shifting the value back a month while the
+    // label (built from the same local date) still read correctly. Build
+    // the value from local date parts instead so a payment actually gets
+    // filed under the month its label says (owner report 2026-07-26).
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
     opts.push({ value: val, label: label.charAt(0).toUpperCase() + label.slice(1) })
     d.setMonth(d.getMonth() + 1)
@@ -48,7 +54,8 @@ export default function SalariesPage() {
   useEffect(() => {
     if (monthOptions.length === 0) return
     if (!monthOptions.some(o => o.value === month)) {
-      const todayMonth = new Date().toISOString().slice(0, 7)
+      const now = new Date()
+      const todayMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
       const inRange = monthOptions.find(o => o.value === todayMonth)
       setMonth(inRange ? todayMonth : monthOptions[monthOptions.length - 1].value)
     }
