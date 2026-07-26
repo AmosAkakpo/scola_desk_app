@@ -237,6 +237,10 @@ function runMigrations() {
         {
             version: '020_user_permissions',
             run: require('./migration/020_user_permissions').migration020
+        },
+        {
+            version: '021_split_page_permissions',
+            run: require('./migration/021_split_page_permissions').migration021
         }
     ]
 

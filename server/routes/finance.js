@@ -102,7 +102,7 @@ function generateReceiptNumber(db, yearId, prefix) {
 // (shared with reportcards.js for the payment banner) — logic unchanged.
 
 // ─── ACADEMIC YEARS (for the year-switcher dropdown) ───────
-router.get('/academic-years', requirePermission('finance.view'), (req, res) => {
+router.get('/academic-years', requirePermission('finance_dashboard.view'), (req, res) => {
   const db = getDb()
   const years = db.prepare('SELECT id, label, is_active, start_date, end_date FROM academic_years ORDER BY label DESC').all()
   return res.json({ years })
@@ -110,7 +110,7 @@ router.get('/academic-years', requirePermission('finance.view'), (req, res) => {
 
 // ─── DASHBOARD ──────────────────────────────────────────────
 
-router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
+router.get('/dashboard', requirePermission('finance_dashboard.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db, req)
 
@@ -203,7 +203,7 @@ router.get('/dashboard', requirePermission('finance.view'), (req, res) => {
 
 // ─── FEE TYPES (settings) ───────────────────────────────────
 
-router.get('/fee-types', requirePermission('finance.view'), (req, res) => {
+router.get('/fee-types', requirePermission('fee_settings.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
 
@@ -227,7 +227,7 @@ router.get('/fee-types', requirePermission('finance.view'), (req, res) => {
   return res.json({ fee_types: types, levels })
 })
 
-router.post('/fee-types', requirePermission('finance.edit'), (req, res) => {
+router.post('/fee-types', requirePermission('fee_settings.edit'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { name, is_mandatory, display_order, amounts } = req.body
@@ -255,7 +255,7 @@ router.post('/fee-types', requirePermission('finance.edit'), (req, res) => {
   return res.json({ success: true })
 })
 
-router.put('/fee-types/:id', requirePermission('finance.edit'), (req, res) => {
+router.put('/fee-types/:id', requirePermission('fee_settings.edit'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const ft = db.prepare('SELECT id, is_system FROM fee_types WHERE id = ?').get(req.params.id)
@@ -288,7 +288,7 @@ router.put('/fee-types/:id', requirePermission('finance.edit'), (req, res) => {
   return res.json({ success: true })
 })
 
-router.delete('/fee-types/:id', requirePermission('finance.edit'), (req, res) => {
+router.delete('/fee-types/:id', requirePermission('fee_settings.edit'), (req, res) => {
   const db = getDb()
   const ft = db.prepare('SELECT id, is_system FROM fee_types WHERE id = ?').get(req.params.id)
   if (!ft) return res.status(404).json({ error: 'NOT_FOUND' })
@@ -307,7 +307,7 @@ router.delete('/fee-types/:id', requirePermission('finance.edit'), (req, res) =>
 
 // ─── TUITION — student list with fee summary ────────────────
 
-router.get('/tuition', requirePermission('finance.view'), (req, res) => {
+router.get('/tuition', requirePermission('tuition.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { classroom_id, status, search, sort, page, limit } = req.query
@@ -371,7 +371,7 @@ router.get('/tuition', requirePermission('finance.view'), (req, res) => {
 
 // ─── TUITION — student detail ───────────────────────────────
 
-router.get('/tuition/:studentId', requirePermission('finance.view'), (req, res) => {
+router.get('/tuition/:studentId', requirePermission('tuition.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { studentId } = req.params
@@ -410,7 +410,7 @@ router.get('/tuition/:studentId', requirePermission('finance.view'), (req, res) 
 
 // ─── TUITION — fee selections (optional fee toggle) ─────────
 
-router.get('/tuition/:studentId/fee-selections', requirePermission('finance.view'), (req, res) => {
+router.get('/tuition/:studentId/fee-selections', requirePermission('tuition.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { studentId } = req.params
@@ -448,7 +448,7 @@ router.get('/tuition/:studentId/fee-selections', requirePermission('finance.view
   return res.json({ selections: result })
 })
 
-router.put('/tuition/:studentId/fee-selections', requirePermission('finance.edit'), (req, res) => {
+router.put('/tuition/:studentId/fee-selections', requirePermission('tuition.edit'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { studentId } = req.params
@@ -479,7 +479,7 @@ router.put('/tuition/:studentId/fee-selections', requirePermission('finance.edit
 
 // ─── TUITION — record payment ───────────────────────────────
 
-router.post('/tuition/:studentId/pay', requirePermission('finance.edit'), (req, res) => {
+router.post('/tuition/:studentId/pay', requirePermission('tuition.edit'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { studentId } = req.params
@@ -552,7 +552,7 @@ router.post('/tuition/:studentId/pay', requirePermission('finance.edit'), (req, 
 
 // ─── SALARIES ───────────────────────────────────────────────
 
-router.get('/salaries', requirePermission('finance.view'), (req, res) => {
+router.get('/salaries', requirePermission('salaries.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db, req)
   const { pay_period } = req.query
@@ -620,7 +620,7 @@ router.get('/salaries', requirePermission('finance.view'), (req, res) => {
 // ─── SALARY — teacher detail (payments for a month) ─────────
 // NOTE: must be defined before /:teacherId to avoid route shadowing
 
-router.get('/salaries/:teacherId', requirePermission('finance.view'), (req, res) => {
+router.get('/salaries/:teacherId', requirePermission('salaries.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db, req)
   const { teacherId } = req.params
@@ -670,7 +670,7 @@ router.get('/salaries/:teacherId', requirePermission('finance.view'), (req, res)
   })
 })
 
-router.post('/salaries/:teacherId/pay', requirePermission('finance.edit'), (req, res) => {
+router.post('/salaries/:teacherId/pay', requirePermission('salaries.edit'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { teacherId } = req.params
@@ -731,7 +731,7 @@ router.post('/salaries/:teacherId/pay', requirePermission('finance.edit'), (req,
 
 // ─── EXPENSES ───────────────────────────────────────────────
 
-router.get('/expenses', requirePermission('finance.view'), (req, res) => {
+router.get('/expenses', requirePermission('expenses.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db, req)
   const { month, category_id } = req.query
@@ -795,7 +795,7 @@ router.get('/expenses', requirePermission('finance.view'), (req, res) => {
   return res.json({ expenses: allRows, categories, totals })
 })
 
-router.get('/expenses/months', requirePermission('finance.view'), (req, res) => {
+router.get('/expenses/months', requirePermission('expenses.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db, req)
 
@@ -814,7 +814,7 @@ router.get('/expenses/months', requirePermission('finance.view'), (req, res) => 
   return res.json({ months })
 })
 
-router.post('/expenses', requirePermission('finance.edit'), (req, res) => {
+router.post('/expenses', requirePermission('expenses.edit'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { category_id, description, amount, expense_date, receipt_ref } = req.body
@@ -840,7 +840,7 @@ router.post('/expenses', requirePermission('finance.edit'), (req, res) => {
   return res.json({ success: true })
 })
 
-router.delete('/expenses/:id', requirePermission('finance.edit'), (req, res) => {
+router.delete('/expenses/:id', requirePermission('expenses.edit'), (req, res) => {
   const db = getDb()
   db.prepare("UPDATE expenses SET is_deleted = 1, deleted_at = datetime('now') WHERE id = ?").run(req.params.id)
   return res.json({ success: true })
@@ -848,13 +848,13 @@ router.delete('/expenses/:id', requirePermission('finance.edit'), (req, res) => 
 
 // ─── EXPENSE CATEGORIES ─────────────────────────────────────
 
-router.get('/expense-categories', requirePermission('finance.view'), (req, res) => {
+router.get('/expense-categories', requirePermission('expenses.view'), (req, res) => {
   const db = getDb()
   const categories = db.prepare('SELECT * FROM expense_categories WHERE is_active = 1 ORDER BY name').all()
   return res.json({ categories })
 })
 
-router.post('/expense-categories', requirePermission('finance.edit'), (req, res) => {
+router.post('/expense-categories', requirePermission('expenses.edit'), (req, res) => {
   const db = getDb()
   const { name, description } = req.body
   if (!name) return res.status(400).json({ error: 'MISSING_FIELDS' })
@@ -866,7 +866,7 @@ router.post('/expense-categories', requirePermission('finance.edit'), (req, res)
   return res.json({ success: true })
 })
 
-router.delete('/expense-categories/:id', requirePermission('finance.edit'), (req, res) => {
+router.delete('/expense-categories/:id', requirePermission('expenses.edit'), (req, res) => {
   const db = getDb()
   const cat = db.prepare('SELECT is_system FROM expense_categories WHERE id = ?').get(req.params.id)
   if (cat?.is_system) return res.status(403).json({ error: 'SYSTEM_CATEGORY' })
@@ -882,7 +882,7 @@ router.delete('/expense-categories/:id', requirePermission('finance.edit'), (req
 
 // ─── OTHER REVENUES ─────────────────────────────────────────
 
-router.get('/other-revenues', requirePermission('finance.view'), (req, res) => {
+router.get('/other-revenues', requirePermission('expenses.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { month, category_id } = req.query
@@ -912,7 +912,7 @@ router.get('/other-revenues', requirePermission('finance.view'), (req, res) => {
   return res.json({ revenues, categories, totals })
 })
 
-router.post('/other-revenues', requirePermission('finance.edit'), (req, res) => {
+router.post('/other-revenues', requirePermission('expenses.edit'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const { category_id, description, amount, revenue_date, reference } = req.body
@@ -941,19 +941,19 @@ router.post('/other-revenues', requirePermission('finance.edit'), (req, res) => 
   return res.json({ success: true })
 })
 
-router.delete('/other-revenues/:id', requirePermission('finance.edit'), (req, res) => {
+router.delete('/other-revenues/:id', requirePermission('expenses.edit'), (req, res) => {
   const db = getDb()
   db.prepare("UPDATE other_revenues SET is_deleted = 1 WHERE id = ?").run(req.params.id)
   return res.json({ success: true })
 })
 
-router.get('/revenue-categories', requirePermission('finance.view'), (req, res) => {
+router.get('/revenue-categories', requirePermission('expenses.view'), (req, res) => {
   const db = getDb()
   const categories = db.prepare('SELECT * FROM revenue_categories WHERE is_active = 1 ORDER BY name').all()
   return res.json({ categories })
 })
 
-router.post('/revenue-categories', requirePermission('finance.edit'), (req, res) => {
+router.post('/revenue-categories', requirePermission('expenses.edit'), (req, res) => {
   const db = getDb()
   const { name } = req.body
   if (!name) return res.status(400).json({ error: 'MISSING_FIELDS' })
@@ -963,7 +963,7 @@ router.post('/revenue-categories', requirePermission('finance.edit'), (req, res)
   return res.json({ success: true })
 })
 
-router.delete('/revenue-categories/:id', requirePermission('finance.edit'), (req, res) => {
+router.delete('/revenue-categories/:id', requirePermission('expenses.edit'), (req, res) => {
   const db = getDb()
   const cat = db.prepare('SELECT is_system FROM revenue_categories WHERE id = ?').get(req.params.id)
   if (!cat) return res.status(404).json({ error: 'NOT_FOUND' })
@@ -979,7 +979,7 @@ router.delete('/revenue-categories/:id', requirePermission('finance.edit'), (req
 
 // ─── RAPPORT FINANCIER (annual month-by-month report) ──────
 
-router.get('/report', requirePermission('finance.view'), (req, res) => {
+router.get('/report', requirePermission('finance_report.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db, req)
   const year = yearId ? db.prepare('SELECT label, start_date, end_date FROM academic_years WHERE id = ?').get(yearId) : null
@@ -1029,7 +1029,7 @@ router.get('/report', requirePermission('finance.view'), (req, res) => {
 
 // ─── RECEIPTS (print data) ─────────────────────────────────
 
-router.get('/receipt/payment/:id', requirePermission('finance.view'), (req, res) => {
+router.get('/receipt/payment/:id', requirePermission('tuition.view'), (req, res) => {
   const db = getDb()
   const school = db.prepare('SELECT * FROM school_config LIMIT 1').get()
 
@@ -1048,7 +1048,7 @@ router.get('/receipt/payment/:id', requirePermission('finance.view'), (req, res)
   return res.json({ type: 'payment', school, data: payment })
 })
 
-router.get('/receipt/salary/:id', requirePermission('finance.view'), (req, res) => {
+router.get('/receipt/salary/:id', requirePermission('salaries.view'), (req, res) => {
   const db = getDb()
   const school = db.prepare('SELECT * FROM school_config LIMIT 1').get()
 
@@ -1070,7 +1070,7 @@ router.get('/receipt/salary/:id', requirePermission('finance.view'), (req, res) 
   return res.json({ type: 'salary', school, data: entry })
 })
 
-router.get('/receipt/statement/:studentId', requirePermission('finance.view'), (req, res) => {
+router.get('/receipt/statement/:studentId', requirePermission('tuition.view'), (req, res) => {
   const db = getDb()
   const yearId = getYearId(db)
   const school = db.prepare('SELECT * FROM school_config LIMIT 1').get()

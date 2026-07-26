@@ -25,13 +25,18 @@ router.use((req, res, next) => {
 router.get('/', (req, res) => {
   const db = getDb()
   const users = db.prepare(`
-    SELECT u.id, u.user_uid, u.full_name, u.username, u.is_active, u.created_at,
+    SELECT u.id, u.user_uid, u.full_name, u.username, u.is_active, u.created_at, u.custom_title,
            r.name AS role_name, r.label AS role_label
     FROM users u
     JOIN roles r ON r.id = u.role_id
     WHERE u.is_deleted = 0
     ORDER BY (r.name = 'admin') DESC, u.full_name
   `).all()
+  // 'staff' (Personnalisé) shows the admin-typed title instead of the
+  // shared role label, which would just say "Personnalisé" for everyone.
+  for (const u of users) {
+    if (u.role_name === 'staff' && u.custom_title) u.role_label = u.custom_title
+  }
 
   // Per-user permission codes (owner request 2026-07-25: access is
   // individually editable now, not just whatever the role bundle says) --
@@ -46,18 +51,29 @@ router.get('/', (req, res) => {
   return res.json({ users, tier: getLicenseTier(db) })
 })
 
-// ─── GET /api/users/permissions/catalog — page groups for the checklist ─
-// One entry = one checkbox in the admin UI = one or more permission codes
-// granted/revoked together. proOnly groups are still filtered client-side
-// by license tier same as the nav itself.
+// ─── GET /api/users/permissions/catalog — one entry per PAGE ────
+// Owner request 2026-07-25 (2nd pass): each page independently
+// toggleable, not bundled -- a censeur can get Emploi du temps +
+// Enseignants alone, a secrétaire Notes + Élèves without Emploi du
+// temps, a finance person just Paiements without the rest of Finance.
+// proOnly groups are still filtered client-side by license tier, same
+// gate the nav itself uses.
 router.get('/permissions/catalog', (req, res) => {
   return res.json({
     groups: [
-      { key: 'academic', label: 'Élèves, enseignants & classes', codes: ['students.view', 'students.edit'] },
-      { key: 'grades', label: 'Notes', codes: ['grades.view', 'grades.edit'] },
-      { key: 'reports', label: 'Bulletins', codes: ['reports.view', 'reports.generate'] },
-      { key: 'attendance', label: 'Présences', codes: ['attendance.view', 'attendance.edit'], proOnly: true },
-      { key: 'finance', label: 'Finance', codes: ['finance.view', 'finance.edit'], proOnly: true },
+      { key: 'students', label: 'Élèves', description: 'Inscriptions, dossiers, tuteurs, transferts, sanctions', codes: ['students.view', 'students.edit'] },
+      { key: 'teachers', label: 'Enseignants', description: 'Dossiers et informations des enseignants', codes: ['teachers.view', 'teachers.edit'] },
+      { key: 'classrooms', label: 'Classes', description: 'Salles de classe, affectations, matières', codes: ['classrooms.view', 'classrooms.edit'] },
+      { key: 'timetable', label: 'Emploi du temps', description: 'Créneaux horaires par classe et par enseignant', codes: ['timetable.view', 'timetable.edit'] },
+      { key: 'grades', label: 'Notes', description: 'Saisie des notes et calcul des moyennes', codes: ['grades.view', 'grades.edit'] },
+      { key: 'reports', label: 'Bulletins', description: 'Génération et consultation des bulletins', codes: ['reports.view', 'reports.generate'] },
+      { key: 'attendance', label: 'Présences', description: 'Enregistrement des présences quotidiennes', codes: ['attendance.view', 'attendance.edit'], proOnly: true },
+      { key: 'finance_dashboard', label: 'Tableau de bord finance', description: "Vue d'ensemble des finances de l'école", codes: ['finance_dashboard.view'], proOnly: true },
+      { key: 'tuition', label: 'Paiements scolarité', description: 'Encaissement et suivi des paiements des élèves', codes: ['tuition.view', 'tuition.edit'], proOnly: true },
+      { key: 'salaries', label: 'Salaires', description: 'Paiement des salaires des enseignants et du personnel', codes: ['salaries.view', 'salaries.edit'], proOnly: true },
+      { key: 'expenses', label: 'Dépenses', description: "Dépenses et autres revenus de l'école", codes: ['expenses.view', 'expenses.edit'], proOnly: true },
+      { key: 'finance_report', label: 'Rapport financier', description: "Rapport financier global de l'école", codes: ['finance_report.view'], proOnly: true },
+      { key: 'fee_settings', label: 'Frais & catégories', description: 'Configuration des frais scolaires par niveau', codes: ['fee_settings.view', 'fee_settings.edit'], proOnly: true },
     ],
   })
 })
@@ -68,12 +84,15 @@ router.get('/permissions/catalog', (req, res) => {
 // code flow elsewhere.
 router.post('/', async (req, res) => {
   try {
-    const { full_name, username, password, role, permissions } = req.body
+    const { full_name, username, password, role, custom_title, permissions } = req.body
     if (!full_name?.trim() || !username?.trim() || !password || !role) {
       return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Tous les champs sont requis' })
     }
-    if (!['secretary', 'accountant'].includes(role)) {
+    if (!['secretary', 'accountant', 'staff'].includes(role)) {
       return res.status(400).json({ error: 'INVALID_ROLE', message: 'Rôle invalide' })
+    }
+    if (role === 'staff' && !custom_title?.trim()) {
+      return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Titre requis pour un rôle personnalisé' })
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Mot de passe minimum 6 caractères' })
@@ -82,16 +101,19 @@ router.post('/', async (req, res) => {
     const db = getDb()
     const tier = getLicenseTier(db)
 
-    if (role === 'accountant' && tier !== 'PRO') {
-      return res.status(403).json({ error: 'TIER_INSUFFICIENT', message: 'Le rôle comptable requiert une licence PRO' })
-    }
-    if (role === 'secretary' && tier !== 'PRO') {
-      const existingSecretary = db.prepare(`
-        SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
-        WHERE r.name = 'secretary' AND u.is_deleted = 0
-      `).get()
-      if (existingSecretary) {
-        return res.status(403).json({ error: 'TIER_LIMIT', message: 'La licence STANDARD est limitée à un compte secrétaire' })
+    // Owner request 2026-07-25: since access is now fully custom per page
+    // (finance pages are already disabled client-side unless PRO), the
+    // old per-role caps ("1 secretary, 0 accountant on STANDARD") no
+    // longer have a role name to check against for a "Personnalisé"
+    // account. Simplified to a flat account count instead: STANDARD
+    // allows 1 non-admin account total, regardless of role/title.
+    if (tier !== 'PRO') {
+      const existingCount = db.prepare(`
+        SELECT COUNT(*) AS cnt FROM users u JOIN roles r ON r.id = u.role_id
+        WHERE r.name != 'admin' AND u.is_deleted = 0
+      `).get().cnt
+      if (existingCount >= 1) {
+        return res.status(403).json({ error: 'TIER_LIMIT', message: 'La licence STANDARD est limitée à un compte supplémentaire (hors administrateur)' })
       }
     }
 
@@ -106,9 +128,9 @@ router.post('/', async (req, res) => {
     const passwordHash = await hashPassword(password)
     const prefix = getSchoolPrefix(db)
     db.prepare(`
-      INSERT INTO users (user_uid, matricule, full_name, username, password_hash, role_id)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(generateUserUID(prefix), generateShortUID('U'), full_name.trim(), username.trim().toLowerCase(), passwordHash, roleRow.id)
+      INSERT INTO users (user_uid, matricule, full_name, username, password_hash, role_id, custom_title)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(generateUserUID(prefix), generateShortUID('U'), full_name.trim(), username.trim().toLowerCase(), passwordHash, roleRow.id, role === 'staff' ? custom_title.trim() : null)
 
     const newUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim().toLowerCase())
 

@@ -8,7 +8,7 @@ const { requirePermission } = require('../middleware/requirePermission')
 router.use(requireAuth)
 
 // ─── GET /api/teachers — List with search + filters ─────────
-router.get('/', requirePermission('students.view'), (req, res) => {
+router.get('/', requirePermission('teachers.view'), (req, res) => {
   const db = getDb()
   const { search, status, page, limit } = req.query
   const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
@@ -65,7 +65,7 @@ router.get('/', requirePermission('students.view'), (req, res) => {
 })
 
 // ─── GET /api/teachers/:id — Full profile ───────────────────
-router.get('/:id', requirePermission('students.view'), (req, res) => {
+router.get('/:id', requirePermission('teachers.view'), (req, res) => {
   const db = getDb()
   const teacher = db.prepare(`
     SELECT t.*, s.name AS specialty_name FROM teachers t
@@ -107,7 +107,7 @@ router.get('/:id', requirePermission('students.view'), (req, res) => {
 })
 
 // ─── PUT /api/teachers/:id — Update info ────────────────────
-router.put('/:id', requirePermission('students.edit'), (req, res) => {
+router.put('/:id', requirePermission('teachers.edit'), (req, res) => {
   const db = getDb()
   const { full_name, phone, email, qualification, hourly_rate } = req.body
   const teacher = db.prepare('SELECT id FROM teachers WHERE id = ? AND is_deleted = 0').get(req.params.id)
@@ -120,7 +120,7 @@ router.put('/:id', requirePermission('students.edit'), (req, res) => {
 })
 
 // ─── PATCH /api/teachers/:id/toggle-active — Toggle active status ─
-router.patch('/:id/toggle-active', requirePermission('students.edit'), (req, res) => {
+router.patch('/:id/toggle-active', requirePermission('teachers.edit'), (req, res) => {
   const db = getDb()
   const teacher = db.prepare('SELECT id, is_active FROM teachers WHERE id = ? AND is_deleted = 0').get(req.params.id)
   if (!teacher) return res.status(404).json({ error: 'NOT_FOUND' })
@@ -132,7 +132,7 @@ router.patch('/:id/toggle-active', requirePermission('students.edit'), (req, res
 })
 
 // ─── POST /api/teachers — Add new teacher ───────────────────
-router.post('/', requirePermission('students.edit'), (req, res) => {
+router.post('/', requirePermission('teachers.edit'), (req, res) => {
   const db = getDb()
   const { full_name, phone, email } = req.body
   if (!full_name?.trim()) return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Nom requis' })

@@ -2,14 +2,18 @@ import { useState, useEffect } from 'react'
 import api from '../../utils/api'
 import ConfirmModal from '../../components/ConfirmModal'
 
-const ROLE_COLORS = { admin: 'bg-steel-100 text-steel-600', secretary: 'bg-blue-50 text-blue-600', accountant: 'bg-brand-50 text-brand-600' }
+const ROLE_COLORS = { admin: 'bg-steel-100 text-steel-600', secretary: 'bg-blue-50 text-blue-600', accountant: 'bg-brand-50 text-brand-600', staff: 'bg-purple-50 text-purple-600' }
 
 // Pre-checked starting point when a role is picked at creation (owner
 // request 2026-07-25: still want the usual case to be one click, not an
 // empty checklist every time) -- admin can freely add/remove from here,
 // before or after creating the account. Purely a UI convenience; the
 // actual grant is whatever ends up checked, independent of role.
-const ROLE_DEFAULT_GROUPS = { secretary: ['academic', 'grades', 'reports', 'attendance'], accountant: ['finance'] }
+// 'staff' (Personnalisé) deliberately has no entry -- starts blank, by design.
+const ROLE_DEFAULT_GROUPS = {
+  secretary: ['students', 'teachers', 'classrooms', 'timetable', 'grades', 'reports', 'attendance'],
+  accountant: ['finance_dashboard', 'tuition', 'salaries', 'expenses', 'finance_report', 'fee_settings'],
+}
 
 export default function UsersPage() {
   const [users, setUsers] = useState([])
@@ -63,8 +67,8 @@ export default function UsersPage() {
     setResetting(false)
   }
 
-  const secretaryCount = users.filter(u => u.role_name === 'secretary').length
-  const canAddSecretary = tier === 'PRO' || secretaryCount === 0
+  const nonAdminCount = users.filter(u => u.role_name !== 'admin').length
+  const canAddAnother = tier === 'PRO' || nonAdminCount === 0
 
   return (
     <div>
@@ -142,8 +146,7 @@ export default function UsersPage() {
 
       {showAdd && (
         <AddUserModal
-          canAddSecretary={canAddSecretary}
-          canAddAccountant={tier === 'PRO'}
+          canAddAnother={canAddAnother}
           catalog={catalog}
           tier={tier}
           onClose={() => setShowAdd(false)}
@@ -209,11 +212,14 @@ function PermissionChecklist({ catalog, tier, selected, onToggle }) {
         const locked = g.proOnly && tier !== 'PRO'
         const checked = g.codes.every(c => selected.includes(c))
         return (
-          <label key={g.key} className={`flex items-center gap-2.5 px-3 py-2 border rounded-lg text-sm ${locked ? 'opacity-50 cursor-not-allowed border-steel-100' : 'border-steel-200 hover:bg-steel-50 cursor-pointer'}`}>
+          <label key={g.key} className={`flex items-start gap-2.5 px-3 py-2 border rounded-lg text-sm ${locked ? 'opacity-50 cursor-not-allowed border-steel-100' : 'border-steel-200 hover:bg-steel-50 cursor-pointer'}`}>
             <input type="checkbox" checked={checked} disabled={locked} onChange={() => onToggle(g)}
-              className="rounded border-steel-300 text-brand focus:ring-brand" />
-            <span className="text-steel-700">{g.label}</span>
-            {locked && <span className="text-[10px] text-steel-400 ml-auto">PRO uniquement</span>}
+              className="rounded border-steel-300 text-brand focus:ring-brand mt-0.5 self-start" />
+            <span className="flex-1">
+              <span className="block text-steel-700">{g.label}</span>
+              {g.description && <span className="block text-[11px] text-steel-400 mt-0.5">{g.description}</span>}
+            </span>
+            {locked && <span className="text-[10px] text-steel-400 ml-auto shrink-0">PRO uniquement</span>}
           </label>
         )
       })}
@@ -221,9 +227,9 @@ function PermissionChecklist({ catalog, tier, selected, onToggle }) {
   )
 }
 
-function AddUserModal({ canAddSecretary, canAddAccountant, catalog, tier, onClose, onCreated }) {
-  const defaultRole = canAddSecretary ? 'secretary' : (canAddAccountant ? 'accountant' : '')
-  const [form, setForm] = useState({ full_name: '', username: '', password: '', role: defaultRole })
+function AddUserModal({ canAddAnother, catalog, tier, onClose, onCreated }) {
+  const defaultRole = canAddAnother ? 'secretary' : ''
+  const [form, setForm] = useState({ full_name: '', username: '', password: '', role: defaultRole, custom_title: '' })
   const [permissions, setPermissions] = useState(() => groupsToCodes(catalog, ROLE_DEFAULT_GROUPS[defaultRole] || []))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -246,6 +252,9 @@ function AddUserModal({ canAddSecretary, canAddAccountant, catalog, tier, onClos
     e.preventDefault()
     if (!form.full_name.trim() || !form.username.trim() || !form.password || !form.role) {
       setError('Tous les champs sont requis'); return
+    }
+    if (form.role === 'staff' && !form.custom_title.trim()) {
+      setError('Le titre est requis pour un accès personnalisé'); return
     }
     setSaving(true); setError('')
     try {
@@ -282,13 +291,22 @@ function AddUserModal({ canAddSecretary, canAddAccountant, catalog, tier, onClos
             <select required value={form.role} onChange={e => changeRole(e.target.value)}
               className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
               <option value="">— Sélectionner —</option>
-              {canAddSecretary && <option value="secretary">Secrétaire</option>}
-              {canAddAccountant && <option value="accountant">Comptable</option>}
+              {canAddAnother && <option value="secretary">Secrétaire</option>}
+              {canAddAnother && <option value="accountant">Comptable</option>}
+              {canAddAnother && <option value="staff">Personnalisé</option>}
             </select>
-            {!canAddSecretary && !canAddAccountant && (
-              <p className="text-xs text-orange-500 mt-1">Licence STANDARD : limite d'un compte secrétaire atteinte.</p>
+            {!canAddAnother && (
+              <p className="text-xs text-orange-500 mt-1">Licence STANDARD : limite d'un compte supplémentaire atteinte.</p>
             )}
           </div>
+          {form.role === 'staff' && (
+            <div>
+              <label className="block text-xs text-steel-500 mb-1">Titre <span className="text-red-500">*</span></label>
+              <input type="text" required value={form.custom_title} onChange={e => setForm(p => ({ ...p, custom_title: e.target.value }))}
+                placeholder="ex: Censeur, Surveillant général..."
+                className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand" />
+            </div>
+          )}
           <div>
             <label className="block text-xs text-steel-500 mb-1.5">Pages accessibles</label>
             <p className="text-[11px] text-steel-400 mb-2">Pré-cochées selon le rôle — ajustez librement, modifiable à tout moment plus tard.</p>

@@ -20,7 +20,7 @@ function validTime(t) {
 const overlaps = (s1, e1, s2, e2) => s1 < e2 && s2 < e1
 
 // ─── GET /api/timetable/config ──────────────────────────────
-router.get('/config', requirePermission('students.view'), (req, res) => {
+router.get('/config', requirePermission('timetable.view'), (req, res) => {
   const db = getDb()
   const get = k => db.prepare('SELECT value FROM app_settings WHERE key = ?').get(k)?.value
   let days = [1, 2, 3, 4, 5, 6]
@@ -52,7 +52,7 @@ router.put('/config', (req, res) => {
 })
 
 // ─── GET /api/timetable/options — classes + teachers for pickers ─
-router.get('/options', requirePermission('students.view'), (req, res) => {
+router.get('/options', requirePermission('timetable.view'), (req, res) => {
   const db = getDb()
   const yr = yearId(db)
   const classrooms = db.prepare(`
@@ -64,7 +64,7 @@ router.get('/options', requirePermission('students.view'), (req, res) => {
 })
 
 // ─── GET /api/timetable/class/:classroomId ──────────────────
-router.get('/class/:classroomId', requirePermission('students.view'), (req, res) => {
+router.get('/class/:classroomId', requirePermission('timetable.view'), (req, res) => {
   const db = getDb()
   const yr = yearId(db)
   const classroom = db.prepare('SELECT id, label, level_id, serie_id FROM classrooms WHERE id = ? AND is_deleted = 0').get(req.params.classroomId)
@@ -107,7 +107,7 @@ router.get('/class/:classroomId', requirePermission('students.view'), (req, res)
 })
 
 // ─── GET /api/timetable/teacher/:teacherId ──────────────────
-router.get('/teacher/:teacherId', requirePermission('students.view'), (req, res) => {
+router.get('/teacher/:teacherId', requirePermission('timetable.view'), (req, res) => {
   const db = getDb()
   const yr = yearId(db)
   const teacher = db.prepare('SELECT id, full_name FROM teachers WHERE id = ? AND is_deleted = 0').get(req.params.teacherId)
@@ -136,7 +136,7 @@ router.get('/teacher/:teacherId', requirePermission('students.view'), (req, res)
 })
 
 // ─── POST /api/timetable/entry — create a slot (hard conflict block) ─
-router.post('/entry', requirePermission('students.edit'), (req, res) => {
+router.post('/entry', requirePermission('timetable.edit'), (req, res) => {
   const db = getDb()
   const yr = yearId(db)
   if (!yr) return res.status(400).json({ error: 'NO_YEAR', message: 'Année académique non configurée' })
@@ -192,7 +192,7 @@ router.post('/entry', requirePermission('students.edit'), (req, res) => {
 })
 
 // ─── PUT /api/timetable/entry/:id — move / resize (same conflict rules) ─
-router.put('/entry/:id', requirePermission('students.edit'), (req, res) => {
+router.put('/entry/:id', requirePermission('timetable.edit'), (req, res) => {
   const db = getDb()
   const yr = yearId(db)
   const entry = db.prepare('SELECT * FROM timetable_entries WHERE id = ?').get(req.params.id)
@@ -241,7 +241,7 @@ router.put('/entry/:id', requirePermission('students.edit'), (req, res) => {
 })
 
 // ─── DELETE /api/timetable/entry/:id ────────────────────────
-router.delete('/entry/:id', requirePermission('students.edit'), (req, res) => {
+router.delete('/entry/:id', requirePermission('timetable.edit'), (req, res) => {
   const db = getDb()
   db.prepare('DELETE FROM timetable_entries WHERE id = ?').run(req.params.id)
   return res.json({ success: true })

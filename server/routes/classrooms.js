@@ -9,7 +9,7 @@ const { requirePermission } = require('../middleware/requirePermission')
 router.use(requireAuth)
 
 // ─── GET /api/classrooms — List for current year ────────────
-router.get('/', requirePermission('students.view'), (req, res) => {
+router.get('/', requirePermission('classrooms.view'), (req, res) => {
   const db = getDb()
   const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
   const classrooms = db.prepare(`
@@ -25,7 +25,7 @@ router.get('/', requirePermission('students.view'), (req, res) => {
 })
 
 // ─── GET /api/classrooms/:id — Detail ───────────────────────
-router.get('/:id', requirePermission('students.view'), (req, res) => {
+router.get('/:id', requirePermission('classrooms.view'), (req, res) => {
   const db = getDb()
   const classroom = db.prepare(`
     SELECT c.*, l.name AS level_name FROM classrooms c
@@ -55,7 +55,7 @@ router.get('/:id', requirePermission('students.view'), (req, res) => {
 })
 
 // ─── PUT /api/classrooms/:id — Update label, capacity ──────
-router.put('/:id', requirePermission('students.edit'), (req, res) => {
+router.put('/:id', requirePermission('classrooms.edit'), (req, res) => {
   const db = getDb()
   const { label, capacity } = req.body
   const classroom = db.prepare('SELECT id FROM classrooms WHERE id = ? AND is_deleted = 0').get(req.params.id)
@@ -68,7 +68,7 @@ router.put('/:id', requirePermission('students.edit'), (req, res) => {
 })
 
 // ─── POST /api/classrooms — Create new classroom ───────────
-router.post('/', requirePermission('students.edit'), (req, res) => {
+router.post('/', requirePermission('classrooms.edit'), (req, res) => {
   const db = getDb()
   const { label, level_id, serie_id, capacity } = req.body
   if (!label?.trim() || !level_id) return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Nom et niveau requis' })
@@ -116,7 +116,7 @@ router.post('/', requirePermission('students.edit'), (req, res) => {
 })
 
 // ─── DELETE /api/classrooms/:id — Soft delete (no students) ─
-router.delete('/:id', requirePermission('students.edit'), (req, res) => {
+router.delete('/:id', requirePermission('classrooms.edit'), (req, res) => {
   const db = getDb()
   const count = db.prepare('SELECT COUNT(*) as cnt FROM enrollments WHERE classroom_id = ? AND is_deleted = 0').get(req.params.id)?.cnt || 0
   if (count > 0) {
@@ -127,7 +127,7 @@ router.delete('/:id', requirePermission('students.edit'), (req, res) => {
 })
 
 // ─── GET /api/classrooms/:id/assignments — Subjects + assigned teacher + teacher list ─
-router.get('/:id/assignments', requirePermission('students.view'), (req, res) => {
+router.get('/:id/assignments', requirePermission('classrooms.view'), (req, res) => {
   const db = getDb()
   const yearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
   const classroom = db.prepare('SELECT level_id, serie_id FROM classrooms WHERE id = ? AND is_deleted = 0').get(req.params.id)
@@ -149,7 +149,7 @@ router.get('/:id/assignments', requirePermission('students.view'), (req, res) =>
 })
 
 // ─── POST /api/classrooms/:id/assignments — Assign/clear teacher for a subject ─
-router.post('/:id/assignments', requirePermission('students.edit'), (req, res) => {
+router.post('/:id/assignments', requirePermission('classrooms.edit'), (req, res) => {
   const db = getDb()
   const { subject_id, teacher_id } = req.body
   if (!subject_id) return res.status(400).json({ error: 'MISSING_FIELDS', message: 'Matière requise' })
@@ -171,7 +171,7 @@ router.post('/:id/assignments', requirePermission('students.edit'), (req, res) =
 })
 
 // ─── POST /api/classrooms/:id/bulk-transfer — Move multiple students ─
-router.post('/:id/bulk-transfer', requirePermission('students.edit'), (req, res) => {
+router.post('/:id/bulk-transfer', requirePermission('classrooms.edit'), (req, res) => {
   const db = getDb()
   const { student_ids, target_classroom_id } = req.body
   if (!student_ids?.length || !target_classroom_id) return res.status(400).json({ error: 'MISSING_FIELDS' })
