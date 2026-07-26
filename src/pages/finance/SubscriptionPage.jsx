@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import api from '../../utils/api'
 
 function formatXOF(n) {
@@ -48,6 +49,8 @@ function SubscriptionTable({ title, subtitle, studentCount, rate }) {
 export default function SubscriptionPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const location = useLocation()
+  const deniedFrom = location.state?.deniedFrom
   useEffect(() => {
     api.get('/api/finance/subscription').then(res => {
       setData(res.data)
@@ -64,6 +67,11 @@ export default function SubscriptionPage() {
 
   return (
     <div>
+      {deniedFrom && (
+        <div className="mb-4 px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700">
+          Vous n'avez pas accès à cette page. Contactez l'administrateur si vous pensez que c'est une erreur.
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-medium text-steel-900">Mon abonnement</h1>

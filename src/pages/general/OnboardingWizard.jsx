@@ -108,19 +108,15 @@ function AccountFields({ label, value, onChange, required, onRemove }) {
   )
 }
 
-// ─── Step 2: Account Creation ────────────────────────────────
-function Step2Accounts({ license, onNext }) {
+// ─── Step 2: Account Creation (admin only — other accounts are added
+// later from Réglages > Utilisateurs, with page-level access control) ─
+function Step2Accounts({ onNext }) {
   const [admin, setAdmin] = useState({ full_name: '', username: '', password: '' })
-  const [secretary, setSecretary] = useState({ full_name: '', username: '', password: '' })
-  const [accountant, setAccountant] = useState({ full_name: '', username: '', password: '' })
-  const [addSecretary, setAddSecretary] = useState(false)
-  const [addAccountant, setAddAccountant] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [existing, setExisting] = useState({})  // role_name → {full_name, username}
-  const isPro = license?.tier === 'PRO'
 
-  // Load already-created accounts (for back-nav). Passwords never returned.
+  // Load already-created account (for back-nav). Password never returned.
   useEffect(() => {
     api.get('/api/onboarding/accounts').then(res => {
       const map = {}
@@ -135,10 +131,8 @@ function Step2Accounts({ license, onNext }) {
     setLoading(true)
     const payload = {}
     if (!existing.admin) payload.admin = admin
-    if (!existing.secretary && addSecretary && secretary.full_name) payload.secretary = secretary
-    if (!existing.accountant && addAccountant && accountant.full_name && isPro) payload.accountant = accountant
     try { await api.post('/api/onboarding/step2', payload); onNext() }
-    catch (err) { setError(err.response?.data?.message || 'Erreur lors de la création des comptes'); setLoading(false) }
+    catch (err) { setError(err.response?.data?.message || 'Erreur lors de la création du compte'); setLoading(false) }
   }
 
   function ExistingAccount({ label, acc }) {
@@ -157,41 +151,19 @@ function Step2Accounts({ license, onNext }) {
 
   return (
     <div className="max-w-lg mx-auto">
-      <h2 className="text-lg font-medium text-steel-900 mb-1">Création des comptes</h2>
-      <p className="text-sm text-steel-500 mb-6">Créez les comptes utilisateurs pour cette école.</p>
+      <h2 className="text-lg font-medium text-steel-900 mb-1">Compte administrateur</h2>
+      <p className="text-sm text-steel-500 mb-6">
+        L'administrateur a accès à toutes les pages et ne peut pas être restreint.
+        Les autres comptes (secrétaire, comptable, ou accès personnalisé) se créent
+        ensuite depuis Réglages &gt; Utilisateurs, où vous choisissez précisément
+        les pages accessibles à chacun.
+      </p>
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Admin */}
         {existing.admin ? (
           <ExistingAccount label="Administrateur" acc={existing.admin} />
         ) : (
           <AccountFields label="Administrateur" value={admin} onChange={setAdmin} required />
         )}
-
-        {/* Secretary */}
-        {existing.secretary ? (
-          <ExistingAccount label="Secrétaire" acc={existing.secretary} />
-        ) : !addSecretary ? (
-          <button type="button" onClick={() => setAddSecretary(true)}
-            className="w-full py-3 border border-dashed border-steel-300 rounded-xl text-sm text-steel-500 hover:border-brand hover:text-brand transition-colors">
-            + Ajouter un(e) secrétaire
-          </button>
-        ) : (
-          <AccountFields label="Secrétaire" value={secretary} onChange={setSecretary}
-            onRemove={() => { setAddSecretary(false); setSecretary({ full_name: '', username: '', password: '' }) }} />
-        )}
-
-        {/* Accountant (PRO) */}
-        {isPro && (existing.accountant ? (
-          <ExistingAccount label="Comptable" acc={existing.accountant} />
-        ) : !addAccountant ? (
-          <button type="button" onClick={() => setAddAccountant(true)}
-            className="w-full py-3 border border-dashed border-steel-300 rounded-xl text-sm text-steel-500 hover:border-brand hover:text-brand transition-colors">
-            + Ajouter un(e) comptable (PRO)
-          </button>
-        ) : (
-          <AccountFields label="Comptable" value={accountant} onChange={setAccountant}
-            onRemove={() => { setAddAccountant(false); setAccountant({ full_name: '', username: '', password: '' }) }} />
-        ))}
 
         {error && <p className="text-red-500 text-sm">{error}</p>}
         <div className="flex justify-end pt-2">
@@ -1735,7 +1707,7 @@ export default function OnboardingWizard({ onComplete }) {
   function renderStep() {
     switch (currentStep) {
       case 1: return <Step1Confirm school={school} license={license} features={features} size={size} semesters={semesters} onNext={advance} />
-      case 2: return <Step2Accounts license={license} onNext={advance} />
+      case 2: return <Step2Accounts onNext={advance} />
       case 3: return <Step3AcademicYear onNext={advance} />
       case 4: return <Step4Levels onNext={advance} />
       case 5: return <Step5Series onNext={advance} />

@@ -6,7 +6,7 @@ import OnboardingWizard from './pages/general/OnboardingWizard'
 import RestorePage from './pages/general/RestorePage'
 import CreateAdminPage from './pages/general/CreateAdminPage'
 import LoginPage from './pages/general/LoginPage'
-import Layout from './components/Layout'
+import Layout, { NAV_GROUPS } from './components/Layout'
 import DashboardPage from './pages/dashboard/DashboardPage'
 import StudentsPage from './pages/students/StudentsPage'
 import StudentDetailPage from './pages/students/StudentDetailPage'
@@ -23,6 +23,7 @@ import ReportCardBatchPage from './pages/reports/ReportCardBatchPage'
 import FinanceDashboardPage from './pages/finance/FinanceDashboardPage'
 import TuitionPage from './pages/finance/TuitionPage'
 import StudentReceiptPage from './pages/finance/StudentReceiptPage'
+import UnpaidReportPage from './pages/finance/UnpaidReportPage'
 import SalariesPage from './pages/finance/SalariesPage'
 import TeacherSalaryPage from './pages/finance/TeacherSalaryPage'
 import ExpensesPage from './pages/finance/ExpensesPage'
@@ -87,53 +88,90 @@ function LoadingScreen() {
   )
 }
 
+// Every account's landing page depends on which pages it was actually
+// granted (owner report 2026-07-26: a custom "censeur" account with only
+// Enseignants/Emploi du temps was always sent to /dashboard, which 403s
+// since it never had students.view -- there's no single "first page" per
+// role anymore now that access is per-user, so walk the real nav in order
+// and land on the first item this account can actually open). Falls back
+// to the one page every account can always see (Mon abonnement) if
+// somehow nothing else matches.
+function firstAccessiblePath(user, hasPermission, isPro) {
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      if (item.proOnly && !isPro) continue
+      if (!item.perm) continue
+      if (item.perm === 'admin') { if (user?.role === 'admin') return item.to; continue }
+      if (hasPermission(item.perm)) return item.to
+    }
+  }
+  return '/finance/subscription'
+}
+
+// Typing a URL directly bypasses the sidebar's filtering entirely (any
+// device on the LAN can reach any path if it knows the link), so each
+// route needs its own guard, not just "hide the link" -- without this a
+// restricted account hitting e.g. /finance/salaries got a 403 from the
+// API and a page stuck showing nothing/spinning forever (owner report
+// 2026-07-26). Denied access bounces to Mon abonnement -- the one page
+// every account can always open -- with a one-line explanation there.
+function RequireAccess({ perm, proOnly, isPro, children }) {
+  const { user, hasPermission } = useAuth()
+  const denied = perm === 'admin' ? user?.role !== 'admin' : perm ? !hasPermission(perm) : false
+  if (denied || (proOnly && !isPro)) {
+    return <Navigate to="/finance/subscription" replace state={{ deniedFrom: true }} />
+  }
+  return children
+}
+
 function ProtectedApp({ schoolInfo }) {
-  const { isAuthenticated, loading, user } = useAuth()
+  const { isAuthenticated, loading, user, hasPermission } = useAuth()
 
   if (loading) return <LoadingScreen />
   if (!isAuthenticated) return <LoginPage onLogin={() => {}} />
+
+  const isPro = (schoolInfo?.tier || '').toUpperCase() === 'PRO'
+  const landingPath = firstAccessiblePath(user, hasPermission, isPro)
+  const guard = (perm, proOnly) => (el) => <RequireAccess perm={perm} proOnly={proOnly} isPro={isPro}>{el}</RequireAccess>
 
   return (
     <BrowserRouter>
       <Routes>
         <Route element={<Layout schoolInfo={schoolInfo} />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/students" element={<StudentsPage />} />
-          <Route path="/students/:id" element={<StudentDetailPage />} />
-          <Route path="/teachers" element={<TeachersPage />} />
-          <Route path="/teachers/:id" element={<TeacherDetailPage />} />
-          <Route path="/classrooms" element={<ClassroomsPage />} />
-          <Route path="/classrooms/:id" element={<ClassroomDetailPage />} />
-          <Route path="/grades" element={<GradesPage />} />
-          <Route path="/grades/compute" element={<GradesComputePage />} />
-          <Route path="/timetable" element={<TimetablePage />} />
-          <Route path="/report-cards" element={<ReportCardsPage />} />
-          <Route path="/report-cards/batch" element={<ReportCardBatchPage />} />
-          <Route path="/report-cards/:id" element={<ReportCardViewPage />} />
-          <Route path="/finance" element={<FinanceDashboardPage />} />
-          <Route path="/finance/tuition" element={<TuitionPage />} />
-          <Route path="/finance/tuition/:studentId" element={<StudentReceiptPage />} />
-          <Route path="/finance/salaries" element={<SalariesPage />} />
-          <Route path="/finance/salaries/:teacherId" element={<TeacherSalaryPage />} />
-<Route path="/finance/expenses" element={<ExpensesPage />} />
-          <Route path="/finance/report" element={<FinanceReportPage />} />
-          <Route path="/finance/settings" element={<FinanceSettingsPage />} />
+          <Route path="/dashboard" element={guard('students.view')(<DashboardPage />)} />
+          <Route path="/students" element={guard('students.view')(<StudentsPage />)} />
+          <Route path="/students/:id" element={guard('students.view')(<StudentDetailPage />)} />
+          <Route path="/teachers" element={guard('teachers.view')(<TeachersPage />)} />
+          <Route path="/teachers/:id" element={guard('teachers.view')(<TeacherDetailPage />)} />
+          <Route path="/classrooms" element={guard('classrooms.view')(<ClassroomsPage />)} />
+          <Route path="/classrooms/:id" element={guard('classrooms.view')(<ClassroomDetailPage />)} />
+          <Route path="/grades" element={guard('grades.view')(<GradesPage />)} />
+          <Route path="/grades/compute" element={guard('grades.edit')(<GradesComputePage />)} />
+          <Route path="/timetable" element={guard('timetable.view')(<TimetablePage />)} />
+          <Route path="/report-cards" element={guard('reports.view')(<ReportCardsPage />)} />
+          <Route path="/report-cards/batch" element={guard('reports.view')(<ReportCardBatchPage />)} />
+          <Route path="/report-cards/:id" element={guard('reports.view')(<ReportCardViewPage />)} />
+          <Route path="/finance" element={guard('finance_dashboard.view', true)(<FinanceDashboardPage />)} />
+          <Route path="/finance/tuition" element={guard('tuition.view', true)(<TuitionPage />)} />
+          <Route path="/finance/tuition/report" element={guard('tuition.view', true)(<UnpaidReportPage />)} />
+          <Route path="/finance/tuition/:studentId" element={guard('tuition.view', true)(<StudentReceiptPage />)} />
+          <Route path="/finance/salaries" element={guard('salaries.view', true)(<SalariesPage />)} />
+          <Route path="/finance/salaries/:teacherId" element={guard('salaries.view', true)(<TeacherSalaryPage />)} />
+          <Route path="/finance/expenses" element={guard('expenses.view', true)(<ExpensesPage />)} />
+          <Route path="/finance/report" element={guard('finance_report.view', true)(<FinanceReportPage />)} />
+          <Route path="/finance/settings" element={guard('fee_settings.view', true)(<FinanceSettingsPage />)} />
           <Route path="/finance/subscription" element={<SubscriptionPage />} />
-          <Route path="/finance/attendance" element={<AttendancePage />} />
-          <Route path="/settings" element={<SettingsLayout />}>
+          <Route path="/finance/attendance" element={guard('attendance.view', true)(<AttendancePage />)} />
+          <Route path="/settings" element={guard('admin')(<SettingsLayout />)}>
             <Route index element={<SchoolSettingsPage />} />
             <Route path="bulletins" element={<BulletinSettingsPage />} />
             <Route path="structure" element={<StructureSettingsPage />} />
             <Route path="license" element={<LicenseSettingsPage />} />
           </Route>
-          <Route path="/sync" element={<SyncPage />} />
-          <Route path="/users" element={<UsersPage />} />
-          <Route path="/fin-annee" element={<FinAnneePage />} />
-          {/* Accountants don't have students.view, so /api/grades/dashboard/stats
-              403s and the general dashboard just shows an error (owner
-              report 2026-07-18) -- send them straight to the Finance
-              dashboard instead, the one page that's actually theirs. */}
-          <Route path="*" element={<Navigate to={user?.role === 'accountant' ? '/finance' : '/dashboard'} replace />} />
+          <Route path="/sync" element={guard('admin')(<SyncPage />)} />
+          <Route path="/users" element={guard('admin')(<UsersPage />)} />
+          <Route path="/fin-annee" element={guard('admin')(<FinAnneePage />)} />
+          <Route path="*" element={<Navigate to={landingPath} replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

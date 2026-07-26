@@ -108,6 +108,15 @@ function getFeeSummariesForYear(db, yearId, studentLevels) {
     WHERE ft.academic_year_id = ?
   `).all(yearId)
 
+  const lastPaymentRows = db.prepare(`
+    SELECT p.student_id, MAX(p.payment_date) as last_payment_date
+    FROM payments p
+    WHERE p.academic_year_id = ? AND p.is_deleted = 0
+    GROUP BY p.student_id
+  `).all(yearId)
+  const lastPaymentMap = {}
+  for (const r of lastPaymentRows) lastPaymentMap[r.student_id] = r.last_payment_date
+
   // Specific (fee_type_id, level_id) row wins over the NULL-level fallback.
   const amountMap = {}
   for (const r of amountRows) amountMap[`${r.fee_type_id}_${r.level_id ?? 'null'}`] = r.amount
@@ -146,7 +155,8 @@ function getFeeSummariesForYear(db, yearId, studentLevels) {
     })
     const remaining = Math.max(0, totalDue - totalPaid)
     const status = totalPaid === 0 ? 'unpaid' : remaining <= 0 ? 'paid' : 'partial'
-    result.set(studentId, { fees: feeList, totalDue, totalPaid, remaining, status })
+    const lastPaymentDate = lastPaymentMap[studentId] || null
+    result.set(studentId, { fees: feeList, totalDue, totalPaid, remaining, status, lastPaymentDate })
   }
   return result
 }

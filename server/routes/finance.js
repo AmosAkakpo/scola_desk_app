@@ -408,6 +408,70 @@ router.get('/tuition/:studentId', requirePermission('tuition.view'), (req, res) 
   return res.json({ student, fees: summary.fees, summary: { totalDue: summary.totalDue, totalPaid: summary.totalPaid, remaining: summary.remaining, status: summary.status }, payments })
 })
 
+// ─── TUITION — état financier / liste des impayés (per classroom) ──
+// classroom_ids: comma-separated ids. Omitted/empty means every classroom
+// in the current year. One table per classroom, everyone listed (paid
+// students included, not just debtors) so the printout doubles as a full
+// class roster of fee status.
+router.get('/tuition-report', requirePermission('tuition.view'), (req, res) => {
+  const db = getDb()
+  const yearId = getYearId(db, req)
+  const year = yearId ? db.prepare('SELECT label FROM academic_years WHERE id = ?').get(yearId) : null
+  const school = db.prepare('SELECT * FROM school_config LIMIT 1').get()
+
+  const { classroom_ids } = req.query
+  const ids = classroom_ids ? String(classroom_ids).split(',').map(n => parseInt(n)).filter(Boolean) : null
+
+  let classroomsQuery = 'SELECT id, label, level_id FROM classrooms WHERE academic_year_id = ? AND is_deleted = 0'
+  const classroomParams = [yearId]
+  if (ids?.length) { classroomsQuery += ` AND id IN (${ids.map(() => '?').join(',')})`; classroomParams.push(...ids) }
+  classroomsQuery += ' ORDER BY label'
+  const classrooms = db.prepare(classroomsQuery).all(...classroomParams)
+
+  const students = db.prepare(`
+    SELECT s.id as student_id, s.full_name, s.matricule, e.classroom_id, c.level_id
+    FROM students s
+    JOIN enrollments e ON e.student_id = s.id AND e.academic_year_id = ? AND e.is_deleted = 0
+    JOIN classrooms c ON c.id = e.classroom_id
+    WHERE s.is_deleted = 0 AND e.classroom_id IN (${classrooms.map(() => '?').join(',') || 'NULL'})
+    ORDER BY s.full_name
+  `).all(yearId, ...classrooms.map(c => c.id))
+
+  const summaries = getFeeSummariesForYear(db, yearId, new Map(students.map(s => [s.student_id, s.level_id])))
+  const studentsByClassroom = {}
+  for (const s of students) {
+    const summary = summaries.get(s.student_id)
+    ;(studentsByClassroom[s.classroom_id] ||= []).push({
+      full_name: s.full_name,
+      matricule: s.matricule,
+      total_due: summary.totalDue,
+      total_paid: summary.totalPaid,
+      remaining: summary.remaining,
+      status: summary.status,
+      last_payment_date: summary.lastPaymentDate,
+    })
+  }
+
+  const result = classrooms.map(c => {
+    const list = studentsByClassroom[c.id] || []
+    const owing = list.filter(s => s.status !== 'paid')
+    return {
+      classroom_id: c.id,
+      classroom_label: c.label,
+      students: list,
+      summary: {
+        total_students: list.length,
+        total_due: list.reduce((s, r) => s + r.total_due, 0),
+        total_paid: list.reduce((s, r) => s + r.total_paid, 0),
+        total_remaining: list.reduce((s, r) => s + r.remaining, 0),
+        count_owing: owing.length,
+      },
+    }
+  })
+
+  return res.json({ school, year_label: year?.label || null, classrooms: result })
+})
+
 // ─── TUITION — fee selections (optional fee toggle) ─────────
 
 router.get('/tuition/:studentId/fee-selections', requirePermission('tuition.view'), (req, res) => {

@@ -126,12 +126,13 @@ router.get('/accounts', (req, res) => {
   return res.json({ accounts: users })
 })
 
-// ─── POST /api/onboarding/step2 — Create accounts ──────────
-// Admin is mandatory. Idempotent: skips usernames that already exist,
-// so going back and adding a missing role works without duplicates.
+// ─── POST /api/onboarding/step2 — Create admin account ─────
+// Admin only. Secretary/accountant/personnalisé accounts are added later
+// from Réglages > Utilisateurs, where page-level access is chosen per
+// account. Idempotent: no-ops if an admin already exists (back-nav).
 router.post('/step2', requireStep(2), async (req, res) => {
   try {
-    const { admin, secretary, accountant } = req.body
+    const { admin } = req.body
     const db = getDb()
 
     const roles = {}
@@ -157,26 +158,12 @@ router.post('/step2', requireStep(2), async (req, res) => {
       }
     }
 
-    // Hash passwords for NEW accounts only (outside transaction)
+    // Hash password for a NEW account only (outside transaction)
     const toCreate = []
 
     if (admin && admin.full_name && admin.username && admin.password && !existingByRole.admin) {
       if (usernameTaken(admin.username)) return res.status(409).json({ error: 'USERNAME_TAKEN', message: `Nom d'utilisateur déjà pris: ${admin.username}` })
       toCreate.push({ role: 'admin', data: admin, hash: await hashPassword(admin.password) })
-    }
-
-    if (secretary && secretary.full_name && secretary.username && secretary.password && !existingByRole.secretary) {
-      if (secretary.password.length < 6) return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Mot de passe secrétaire trop court (min 6)' })
-      if (usernameTaken(secretary.username)) return res.status(409).json({ error: 'USERNAME_TAKEN', message: `Nom d'utilisateur déjà pris: ${secretary.username}` })
-      toCreate.push({ role: 'secretary', data: secretary, hash: await hashPassword(secretary.password) })
-    }
-
-    if (accountant && accountant.full_name && accountant.username && accountant.password && !existingByRole.accountant) {
-      const license = db.prepare('SELECT license_tier FROM license_state LIMIT 1').get()
-      if (license?.license_tier !== 'PRO') return res.status(400).json({ error: 'TIER_REQUIRED', message: 'Le rôle comptable nécessite une licence PRO' })
-      if (accountant.password.length < 6) return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Mot de passe comptable trop court (min 6)' })
-      if (usernameTaken(accountant.username)) return res.status(409).json({ error: 'USERNAME_TAKEN', message: `Nom d'utilisateur déjà pris: ${accountant.username}` })
-      toCreate.push({ role: 'accountant', data: accountant, hash: await hashPassword(accountant.password) })
     }
 
     const created = []

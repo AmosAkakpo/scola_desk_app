@@ -95,7 +95,7 @@ function LicenseExpiryBanner({ expiry }) {
 // accountants/secretaries regardless of their actual granted permissions --
 // with per-user custom access that would silently contradict what the
 // admin just configured, so they're gone; `perm` alone decides visibility.
-const NAV_GROUPS = [
+export const NAV_GROUPS = [
   {
     label: null,
     items: [
