@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
 
-const MAX_BACK_DAYS = 30
 const pad = n => String(n).padStart(2, '0')
 
 // Local-timezone date helpers (toISOString would shift the day around midnight)
@@ -21,20 +20,37 @@ function formatXOF(n) {
   return new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' F'
 }
 
-function getMonthOptions() {
+// Months within [startDate, today] inclusive -- bounded by the academic
+// year like every other month picker in Finance, instead of a fixed
+// rolling window. maxDate stays "today": attendance can't be logged for a
+// day that hasn't happened yet, but there's no reason to cap how far back
+// into the current year you can go (owner report 2026-07-26: the old
+// hardcoded ±30 days made it impossible to fix/backfill anything older).
+function getMonthOptions(startDate) {
   const opts = []
   const now = new Date()
-  for (let i = -5; i <= 0; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+  const start = startDate ? new Date(startDate + 'T00:00:00') : new Date(now.getFullYear(), now.getMonth() - 5, 1)
+  const d = new Date(start.getFullYear(), start.getMonth(), 1)
+  const end = new Date(now.getFullYear(), now.getMonth(), 1)
+  while (d <= end) {
     const val = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
     const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
     opts.push({ value: val, label: label.charAt(0).toUpperCase() + label.slice(1) })
+    d.setMonth(d.getMonth() + 1)
   }
   return opts.reverse()
 }
 
 export default function AttendancePage() {
   const [tab, setTab] = useState('daily')
+  const [yearStart, setYearStart] = useState(null)
+
+  useEffect(() => {
+    api.get('/api/finance/academic-years').then(res => {
+      const active = (res.data.years || []).find(y => y.is_active)
+      setYearStart(active?.start_date || null)
+    }).catch(() => {})
+  }, [])
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -55,13 +71,13 @@ export default function AttendancePage() {
         ))}
       </div>
 
-      {tab === 'daily' && <DailySheet />}
-      {tab === 'month' && <MonthSummary />}
+      {tab === 'daily' && <DailySheet yearStart={yearStart} />}
+      {tab === 'month' && <MonthSummary yearStart={yearStart} />}
     </div>
   )
 }
 
-function DailySheet() {
+function DailySheet({ yearStart }) {
   const [date, setDate] = useState(localToday())
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -73,7 +89,7 @@ function DailySheet() {
   const savedEdits = useRef({})
 
   const maxDate = localToday()
-  const minDate = shiftDate(maxDate, -MAX_BACK_DAYS)
+  const minDate = yearStart || shiftDate(maxDate, -365)
   const canGoPrev = date > minDate
   const canGoNext = date < maxDate
 
@@ -342,11 +358,21 @@ function AddHoursModal({ teachers, defaultDate, minDate, maxDate, onClose, onAdd
   )
 }
 
-function MonthSummary() {
-  const [month, setMonth] = useState(getMonthOptions()[0].value)
+function MonthSummary({ yearStart }) {
+  const monthOptions = getMonthOptions(yearStart)
+  const [month, setMonth] = useState(monthOptions[0].value)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
+
+  // Once the academic year's real start date loads, the option list may
+  // grow further back -- if the still-default first-render month isn't in
+  // range anymore just leave it (it's still a valid, real month), only
+  // reset if somehow it fell out of range entirely.
+  useEffect(() => {
+    if (monthOptions.length && !monthOptions.some(o => o.value === month)) setMonth(monthOptions[0].value)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yearStart])
 
   useEffect(() => {
     setLoading(true)
@@ -363,7 +389,7 @@ function MonthSummary() {
       <div className="flex items-center justify-between mb-4">
         <select value={month} onChange={e => setMonth(e.target.value)}
           className="px-3 py-2 border border-steel-200 rounded-lg text-sm bg-white focus:outline-none focus:border-brand">
-          {getMonthOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <button onClick={() => navigate('/finance/salaries')}
           className="px-3 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors">

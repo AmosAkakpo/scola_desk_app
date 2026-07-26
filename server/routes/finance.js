@@ -154,13 +154,18 @@ router.get('/dashboard', requirePermission('finance_dashboard.view'), (req, res)
     GROUP BY month ORDER BY month
   `).all(yearId, yearId)
 
-  // Combine misc expenses + salary payments into one monthly outflow series
+  // Combine misc expenses + salary payments into one monthly outflow series.
+  // Salaries are grouped by pay_period (the month the salary is FOR), not
+  // created_at (when it was recorded) -- a salary for May entered in July
+  // belongs in May's figures, matching how the Salaires page itself
+  // already filters (owner report 2026-07-26: salaries paid for an older
+  // month weren't showing up under that month anywhere but Salaires).
   const monthlyExpenses = db.prepare(`
     SELECT month, SUM(total) as total FROM (
       SELECT strftime('%Y-%m', expense_date) as month, amount as total
       FROM expenses WHERE academic_year_id = ? AND is_deleted = 0
       UNION ALL
-      SELECT strftime('%Y-%m', created_at) as month, amount as total
+      SELECT pay_period as month, amount as total
       FROM salary_payments WHERE academic_year_id = ? AND is_deleted = 0
     )
     GROUP BY month ORDER BY month
@@ -831,7 +836,9 @@ router.get('/expenses', requirePermission('expenses.view'), (req, res) => {
       WHERE sp.academic_year_id = ? AND sp.is_deleted = 0
     `
     const salParams = [yearId]
-    if (month) { salQuery += " AND strftime('%Y-%m', sp.created_at) = ?"; salParams.push(month) }
+    // Filed under the month the salary is FOR (pay_period), not when it was
+    // recorded -- same reasoning as the dashboard's monthly outflow series.
+    if (month) { salQuery += ' AND sp.pay_period = ?'; salParams.push(month) }
     salQuery += ' ORDER BY sp.created_at DESC'
     salaryRows = db.prepare(salQuery).all(...salParams)
   }
@@ -849,13 +856,18 @@ router.post('/expenses', requirePermission('expenses.edit'), (req, res) => {
   const { category_id, description, amount, expense_date, receipt_ref } = req.body
 
   if (!category_id || !amount || amount <= 0) return res.status(400).json({ error: 'MISSING_FIELDS' })
+  // Description is mandatory (owner request 2026-07-26): the Rapport
+  // financier's itemized breakdown shows it as the line's justification --
+  // an expense with no description there is unreadable, so it's rejected
+  // at creation instead of allowing it to reach the report blank.
+  if (!description?.trim()) return res.status(400).json({ error: 'DESCRIPTION_REQUIRED', message: 'Une description est requise pour justifier la dépense' })
 
   const uid = generateUUID()
   db.transaction(() => {
     db.prepare(`
       INSERT INTO expenses (expense_uid, category_id, description, amount, expense_date, academic_year_id, receipt_ref, recorded_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(uid, category_id, description || null, parseFloat(amount), expense_date || new Date().toISOString().slice(0, 10), yearId, receipt_ref || null, req.user.id)
+    `).run(uid, category_id, description.trim(), parseFloat(amount), expense_date || new Date().toISOString().slice(0, 10), yearId, receipt_ref || null, req.user.id)
 
     const expId = db.prepare('SELECT last_insert_rowid() as id').get().id
     const catName = db.prepare('SELECT name FROM expense_categories WHERE id = ?').get(category_id)?.name || ''
@@ -863,7 +875,7 @@ router.post('/expenses', requirePermission('expenses.edit'), (req, res) => {
     db.prepare(`
       INSERT INTO ledger_transactions (transaction_uid, type, source_type, source_id, academic_year_id, amount, description, transaction_date, created_by)
       VALUES (?, 'expense', 'expense', ?, ?, ?, ?, ?, ?)
-    `).run(generateUUID(), expId, yearId, parseFloat(amount), `${catName} - ${description || ''}`.trim(), expense_date || new Date().toISOString().slice(0, 10), req.user.id)
+    `).run(generateUUID(), expId, yearId, parseFloat(amount), `${catName} - ${description.trim()}`, expense_date || new Date().toISOString().slice(0, 10), req.user.id)
   })()
 
   return res.json({ success: true })
@@ -1036,7 +1048,7 @@ router.get('/report', requirePermission('finance_report.view'), (req, res) => {
   `).all(yearId), 'expenses')
 
   add(db.prepare(`
-    SELECT strftime('%Y-%m', created_at) as month, SUM(amount) as total
+    SELECT pay_period as month, SUM(amount) as total
     FROM salary_payments WHERE academic_year_id = ? AND is_deleted = 0 GROUP BY month
   `).all(yearId), 'salaries')
 
@@ -1054,6 +1066,55 @@ router.get('/report', requirePermission('finance_report.view'), (req, res) => {
   }), { tuition: 0, other: 0, expenses: 0, salaries: 0, solde: 0 })
 
   return res.json({ year_label: year?.label || '', school, months, totals })
+})
+
+// ─── RAPPORT FINANCIER — itemized line-by-line detail for every month at
+// once (owner request 2026-07-26: printing shows the full breakdown by
+// default, not just whatever was expanded on screen -- so the whole
+// year's lines are fetched in one shot instead of lazily per month).
+// Each line: { month, flow: 'entrant'|'sortant', category, description,
+// amount, date }. Tuition is broken down per fee-type allocation (not per
+// payment) so "Scolarité" and "Cantine" show as separate justified lines
+// instead of one lump "paid X" -- the whole point of the drill-down. ────
+router.get('/report/lines', requirePermission('finance_report.view'), (req, res) => {
+  const db = getDb()
+  const yearId = getYearId(db, req)
+
+  const tuitionLines = db.prepare(`
+    SELECT strftime('%Y-%m', p.payment_date) as month, pa.amount, p.payment_date as date,
+      ft.name as category, s.full_name as description
+    FROM payment_allocations pa
+    JOIN payments p ON p.id = pa.payment_id
+    JOIN fee_types ft ON ft.id = pa.fee_type_id
+    JOIN students s ON s.id = p.student_id
+    WHERE p.academic_year_id = ? AND p.is_deleted = 0
+  `).all(yearId).map(r => ({ ...r, flow: 'entrant' }))
+
+  const revenueLines = db.prepare(`
+    SELECT strftime('%Y-%m', r.revenue_date) as month, r.amount, r.revenue_date as date,
+      rc.name as category, COALESCE(NULLIF(r.description, ''), rc.name) as description
+    FROM other_revenues r JOIN revenue_categories rc ON rc.id = r.category_id
+    WHERE r.academic_year_id = ? AND r.is_deleted = 0
+  `).all(yearId).map(r => ({ ...r, flow: 'entrant' }))
+
+  const expenseLines = db.prepare(`
+    SELECT strftime('%Y-%m', e.expense_date) as month, e.amount, e.expense_date as date,
+      COALESCE(ec.name, 'Dépense') as category, e.description as description
+    FROM expenses e LEFT JOIN expense_categories ec ON ec.id = e.category_id
+    WHERE e.academic_year_id = ? AND e.is_deleted = 0
+  `).all(yearId).map(r => ({ ...r, flow: 'sortant' }))
+
+  const salaryLines = db.prepare(`
+    SELECT sp.pay_period as month, sp.amount, sp.created_at as date,
+      'Salaire' as category, t.full_name as description
+    FROM salary_payments sp JOIN teachers t ON t.id = sp.teacher_id
+    WHERE sp.academic_year_id = ? AND sp.is_deleted = 0
+  `).all(yearId).map(r => ({ ...r, flow: 'sortant' }))
+
+  const lines = [...tuitionLines, ...revenueLines, ...expenseLines, ...salaryLines]
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+  return res.json({ lines })
 })
 
 // ─── RECEIPTS (print data) ─────────────────────────────────

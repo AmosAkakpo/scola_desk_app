@@ -172,18 +172,23 @@ function AddExpenseModal({ categories, onClose, onAdded }) {
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10))
   const [receiptRef, setReceiptRef] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (!categoryId || !amount) return
-    setSaving(true)
+    if (!description.trim()) { setError('La description est requise — elle justifie la dépense dans le rapport financier'); return }
+    setSaving(true); setError('')
     try {
       await api.post('/api/finance/expenses', {
-        category_id: parseInt(categoryId), description: description || null,
+        category_id: parseInt(categoryId), description: description.trim(),
         amount: parseFloat(amount), expense_date: expenseDate, receipt_ref: receiptRef || null,
       })
       onAdded()
-    } catch { setSaving(false) }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Erreur')
+      setSaving(false)
+    }
   }
 
   return (
@@ -202,8 +207,8 @@ function AddExpenseModal({ categories, onClose, onAdded }) {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-steel-500 mb-1">Description</label>
-            <input type="text" value={description} onChange={e => setDescription(e.target.value)}
+            <label className="block text-xs text-steel-500 mb-1">Description <span className="text-red-500">*</span></label>
+            <input type="text" required value={description} onChange={e => setDescription(e.target.value)}
               className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand" placeholder="Ex: Achat de cahiers" />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -223,6 +228,7 @@ function AddExpenseModal({ categories, onClose, onAdded }) {
             <input type="text" value={receiptRef} onChange={e => setReceiptRef(e.target.value)}
               className="w-full px-3 py-2 border border-steel-200 rounded-lg text-sm focus:outline-none focus:border-brand" />
           </div>
+          {error && <p className="text-red-500 text-xs">{error}</p>}
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-steel-200 text-steel-600 rounded-lg text-sm font-medium hover:bg-steel-50 transition-colors">Annuler</button>
             <button type="submit" disabled={saving} className="flex-1 py-2.5 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
