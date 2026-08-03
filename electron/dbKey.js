@@ -48,7 +48,20 @@ function getOrCreateDbKey() {
   const file = keyFilePath()
   if (fs.existsSync(file)) {
     const blob = Buffer.from(fs.readFileSync(file, 'utf8'), 'base64')
-    return safeStorage.decryptString(blob)
+    try {
+      return safeStorage.decryptString(blob)
+    } catch (err) {
+      // Windows can no longer decrypt this machine/account-bound blob --
+      // usually a profile reset/reinstall, or the file got corrupted (e.g.
+      // a power cut mid-write, plausible in this app's actual deployment
+      // environment). Not necessarily fatal: activation already escrows
+      // this exact key on CAP, so main.js catches this tagged error and
+      // offers to re-fetch it instead of just crashing (owner report
+      // 2026-07-27).
+      const wrapped = new Error(`Impossible de déchiffrer la clé locale : ${err.message}`)
+      wrapped.code = 'DBKEY_DECRYPT_FAILED'
+      throw wrapped
+    }
   }
   const keyHex = crypto.randomBytes(32).toString('hex')
   storeDbKey(keyHex)

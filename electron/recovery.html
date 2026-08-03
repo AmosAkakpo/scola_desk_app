@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>ScolaDesk — Récupération</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Inter, system-ui, sans-serif;
+    background: #0F172A;
+    color: #E2E8F0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card { width: 100%; max-width: 420px; padding: 32px; }
+  .logo { display: flex; flex-direction: column; align-items: center; margin-bottom: 28px; }
+  .logo img { width: 72px; height: 72px; border-radius: 18px; margin-bottom: 14px; }
+  .logo h1 { font-size: 20px; font-weight: 500; color: #E2E8F0; margin: 0; }
+  .logo p { color: #94A3B8; font-size: 13px; margin: 4px 0 0; }
+  .warn {
+    background: rgba(29, 158, 117, 0.08);
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 13px;
+    color: #94A3B8;
+    line-height: 1.5;
+    margin-bottom: 22px;
+  }
+  label { display: block; font-size: 13px; color: #94A3B8; margin-bottom: 6px; }
+  input {
+    width: 100%;
+    padding: 12px 14px;
+    background: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    color: #E2E8F0;
+    font-size: 16px;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 1px;
+    text-align: center;
+    margin-bottom: 16px;
+    outline: none;
+  }
+  input:focus { border-color: #1D9E75; }
+  button {
+    width: 100%;
+    padding: 13px;
+    background: #1D9E75;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:not(:disabled):hover { background: #0F6E56; }
+  .msg { text-align: center; font-size: 13px; margin-top: 14px; min-height: 18px; }
+  .msg.error { color: #F87171; }
+  .msg.success { color: #5DCAA5; }
+  .hint { text-align: center; font-size: 11px; color: #64748B; margin-top: 20px; }
+  .spinner {
+    width: 32px; height: 32px; margin: 8px auto;
+    border: 3px solid #334155; border-top-color: #1D9E75; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <img src="../public/android-chrome-192x192.png" onerror="this.style.display='none'" alt="ScolaDesk" />
+      <h1>ScolaDesk</h1>
+      <p>Récupération de la clé de sécurité</p>
+    </div>
+
+    <div class="warn">
+      La clé locale qui protège vos données ne peut plus être lue sur cet ordinateur
+      (souvent après une réinitialisation de compte Windows ou une coupure de courant).
+      Entrez vos identifiants de licence pour la récupérer depuis le serveur ScolaDesk —
+      vos données ne sont pas perdues.
+    </div>
+
+    <form id="form">
+      <label>Code école</label>
+      <input id="schoolCode" placeholder="CC-YYYY-XXXX" autocomplete="off" required />
+      <label>Clé de licence</label>
+      <input id="licenseKey" placeholder="SDLK-YYYY-XXXX-XXXX-XXXX" autocomplete="off" required />
+      <button id="submitBtn" type="submit">Récupérer</button>
+      <div id="msg" class="msg"></div>
+    </form>
+
+    <p class="hint">Une connexion internet est requise pour la récupération.</p>
+  </div>
+
+  <script>
+    const form = document.getElementById('form')
+    const btn = document.getElementById('submitBtn')
+    const msg = document.getElementById('msg')
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const schoolCode = document.getElementById('schoolCode').value.trim()
+      const licenseKey = document.getElementById('licenseKey').value.trim()
+      if (!schoolCode || !licenseKey) return
+
+      btn.disabled = true
+      msg.className = 'msg'
+      msg.innerHTML = '<div class="spinner"></div>Récupération en cours...'
+
+      try {
+        const result = await window.scola.invoke('recover-db-key', { schoolCode, licenseKey })
+        if (result.success) {
+          msg.className = 'msg success'
+          msg.textContent = 'Clé récupérée — redémarrage de l\'application...'
+        } else {
+          msg.className = 'msg error'
+          msg.textContent = result.message || 'Échec de la récupération.'
+          btn.disabled = false
+        }
+      } catch (err) {
+        msg.className = 'msg error'
+        msg.textContent = 'Erreur inattendue : ' + err.message
+        btn.disabled = false
+      }
+    })
+  </script>
+</body>
+</html>

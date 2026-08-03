@@ -4,6 +4,7 @@ const fs = require('fs')
 const http = require('http')
 const { fork } = require('child_process')
 const { registerHardwareIPC } = require('./ipc/hardware')
+const { registerKeyRecoveryIPC } = require('./ipc/keyRecovery')
 const { getOrCreateDbKey, storeDbKey } = require('./dbKey')
 
 const isDev = !app.isPackaged
@@ -167,6 +168,26 @@ function createWindow() {
     })
 }
 
+// Shown instead of the normal window when the local .dbkey can't be
+// decrypted (getOrCreateDbKey() threw DBKEY_DECRYPT_FAILED) -- lets the
+// admin re-fetch the school's CAP-escrowed key and recover instead of the
+// app just silently never opening (owner report 2026-07-27).
+function showRecoveryWindow() {
+    mainWindow = new BrowserWindow({
+        width: 480,
+        height: 620,
+        resizable: false,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false,
+        },
+        show: false,
+    })
+    mainWindow.loadFile(path.join(__dirname, 'recovery.html'))
+    mainWindow.once('ready-to-show', () => mainWindow.show())
+}
+
 // First boot can run 19 migrations (or the one-time plaintext->encrypted
 // migration) before the server binds its port -- poll instead of guessing
 // a fixed delay, so the window never opens on a server that isn't ready
@@ -203,6 +224,7 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
     setupFileLogging()
     registerHardwareIPC()
+    registerKeyRecoveryIPC()
     startExpressServer()
     const url = isDev ? 'http://localhost:5173' : 'http://localhost:3000'
     const ready = await waitForServer(url)
@@ -210,6 +232,9 @@ app.whenReady().then(async () => {
     createWindow()
 }).catch((err) => {
     console.error('[BOOT] whenReady chain failed:', err)
+    if (err && err.code === 'DBKEY_DECRYPT_FAILED') {
+        showRecoveryWindow()
+    }
 })
 
 app.on('window-all-closed', () => {

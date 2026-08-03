@@ -348,7 +348,7 @@ function EditPermissionsModal({ user, catalog, tier, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-medium text-steel-900 mb-1">Modifier l'accès</h2>
         <p className="text-xs text-steel-500 mb-4">{user.full_name}</p>
         <PermissionChecklist catalog={catalog} tier={tier} selected={permissions} onToggle={toggleGroup} />

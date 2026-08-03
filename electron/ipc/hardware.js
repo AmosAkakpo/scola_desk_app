@@ -50,4 +50,4 @@ function registerHardwareIPC() {
   })
 }
 
-module.exports = { registerHardwareIPC }
+module.exports = { registerHardwareIPC, collectFingerprint }
