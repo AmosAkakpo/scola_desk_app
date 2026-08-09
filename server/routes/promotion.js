@@ -258,17 +258,21 @@ router.post('/execute/:academicYearId', (req, res) => {
   const oldYearId = parseInt(req.params.academicYearId)
   const { overrides, carry_forward_assignments, new_year_label, confirm_text } = req.body || {}
 
-  // Promotion only opens once the CURRENT year's end_date has passed
-  // (owner-set 2026-07-13, revised from an earlier flat "June onward" rule
-  // to line up with the Aug 1 -> Jul 31 year convention and the Étape 1
-  // countdown banner, which promises "available in N days" counting down
-  // to exactly this date). Reopens automatically once a year's end_date
-  // is in the past -- no manual toggle needed.
-  const currentYear = db.prepare('SELECT end_date FROM academic_years WHERE id = ?').get(oldYearId)
-  if (currentYear?.end_date && new Date() <= new Date(currentYear.end_date)) {
+  // Promotion only opens from August 1st onward -- a fixed calendar date,
+  // the same for every school every year, matching the Aug 1 -> Jul 31
+  // year convention (owner decision 2026-08-09, correcting the previous
+  // rule which checked the school's own configured academic_years.end_date
+  // instead -- that column is admin-editable per school, so it could (and
+  // did) drift away from the real Aug 1 cutoff the Étape 1 banner already
+  // promises. This is the actual enforcement; the banner is only display,
+  // so the two must use the exact same rule -- see /api/activation/status
+  // for the matching promotion_available_date computation).
+  const now = new Date()
+  const threshold = new Date(`${now.getFullYear()}-08-01T00:00:00`)
+  if (now < threshold) {
     return res.status(400).json({
       error: 'PROMOTION_LOCKED',
-      message: `La promotion de fin d'année ne peut être exécutée qu'après le ${new Date(currentYear.end_date).toLocaleDateString('fr-FR')}`,
+      message: `La promotion de fin d'année ne peut être exécutée qu'à partir du ${threshold.toLocaleDateString('fr-FR')}`,
     })
   }
 

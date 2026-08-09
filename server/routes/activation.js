@@ -156,12 +156,26 @@ router.get('/status', (req, res) => {
 
   const currentYearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
   const currentYearRow = currentYearId
-    ? db.prepare('SELECT label, end_date FROM academic_years WHERE id = ?').get(currentYearId)
+    ? db.prepare('SELECT label FROM academic_years WHERE id = ?').get(currentYearId)
     : null
   const academicYearLabel = currentYearRow?.label || null
-  // For the Étape 1 countdown/redirect banner (owner-set 2026-07-13):
-  // promotion opens once this date has passed.
-  const academicYearEndDate = currentYearRow?.end_date || null
+
+  // Fixed calendar date, the same for every school every year -- NOT the
+  // school's own configured academic year end_date, and NOT tied to
+  // whenever the license happens to get renewed/activated (owner decision
+  // 2026-08-09, superseding the 2026-07-13 end_date-based rule, which let
+  // the countdown drift per-school depending on what they'd entered as
+  // their year's end date). The banner counts down to August 1st and
+  // flips to "available" that day, full stop.
+  const promotionAvailableDate = `${now.getFullYear()}-08-01`
+
+  // Once this school has actually run the promotion out of the current
+  // year, the banner should stop offering it again this cycle -- it
+  // naturally resets the following year once current_academic_year_id
+  // moves on to the new year.
+  const promotionAlreadyDone = currentYearId
+    ? !!db.prepare('SELECT 1 FROM promotion_runs WHERE academic_year_from = ? AND is_rolled_back = 0 LIMIT 1').get(currentYearId)
+    : false
 
   // Live student count -- scoped to students actually enrolled THIS year,
   // matching the dashboard (owner report 2026-07-13: subscription page
@@ -192,7 +206,8 @@ router.get('/status', (req, res) => {
     activated: true,
     reactivation_needed: reactivationNeeded,
     academic_year_label: academicYearLabel,
-    academic_year_end_date: academicYearEndDate,
+    promotion_available_date: promotionAvailableDate,
+    promotion_already_done: promotionAlreadyDone,
     configured: config?.is_configured === 1,
     has_users: userCount > 0,
     license_status: licenseStatus,

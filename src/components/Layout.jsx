@@ -5,21 +5,25 @@ import api from '../utils/api.js'
 
 const PROMO_BANNER_DAYS = 14
 
-// Dismissible per year (owner request 2026-07-13): keyed by the year's own
-// end_date, so dismissing it this year doesn't suppress it again next year
-// -- a fresh end_date is a fresh "x" to click.
-function PromotionBanner({ endDate }) {
+// Dismissible per year (owner request 2026-07-13): keyed by the threshold
+// date, so dismissing it this year doesn't suppress it again next year --
+// a fresh date is a fresh "x" to click. The threshold itself is a fixed
+// calendar date (August 1st, every school, every year) rather than each
+// school's own configured academic year end_date or license renewal date
+// (owner decision 2026-08-09) -- alreadyDone hides it for good once this
+// year's promotion has actually been run, regardless of the date.
+function PromotionBanner({ thresholdDate, alreadyDone }) {
   const [dismissed, setDismissed] = useState(false)
-  const storageKey = `scola_promo_banner_dismissed_${endDate}`
+  const storageKey = `scola_promo_banner_dismissed_${thresholdDate}`
 
   useEffect(() => {
-    if (endDate && sessionStorage.getItem(storageKey)) setDismissed(true)
+    if (thresholdDate && sessionStorage.getItem(storageKey)) setDismissed(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endDate])
+  }, [thresholdDate])
 
-  if (!endDate || dismissed) return null
+  if (!thresholdDate || dismissed || alreadyDone) return null
 
-  const end = new Date(endDate + 'T00:00:00')
+  const end = new Date(thresholdDate + 'T00:00:00')
   const daysLeft = Math.ceil((end.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
   if (daysLeft > PROMO_BANNER_DAYS) return null
 
@@ -469,7 +473,7 @@ export default function Layout({ schoolInfo }) {
         {user?.role === 'admin' && <LicenseExpiryBanner expiry={schoolInfo?.expiry} />}
 
         {/* Promotion countdown/redirect banner, admin-only, dismissible */}
-        {user?.role === 'admin' && <PromotionBanner endDate={schoolInfo?.academic_year_end_date} />}
+        {user?.role === 'admin' && <PromotionBanner thresholdDate={schoolInfo?.promotion_available_date} alreadyDone={schoolInfo?.promotion_already_done} />}
 
         {/* Top bar */}
         <header className="h-12 bg-white border-b border-steel-200 flex items-center justify-between px-6 shrink-0">

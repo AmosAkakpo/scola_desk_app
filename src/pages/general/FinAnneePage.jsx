@@ -242,7 +242,7 @@ function Etape1Checklist({ onNext }) {
       {showConfirm && (
         <ConfirmModal
           title="Terminer l'année scolaire ?"
-          message="Cette action lance le processus de fin d'année. Vous pourrez encore annuler après l'exécution finale, mais seulement pendant 14 jours."
+          message="Cette action lance le processus de fin d'année. Vérifiez bien les informations avant de continuer : cette action est définitive."
           confirmLabel="Oui, continuer"
           onCancel={() => setShowConfirm(false)}
           onConfirm={() => { setShowConfirm(false); onNext() }}
@@ -681,13 +681,16 @@ function Etape4Execute({ yearId, yearLabel, overrides, previewSummary, onDone, o
   )
 }
 
-// ─── Étape 5 — Historique / Rollback ──────────────────────────
+// ─── Étape 5 — Historique ──────────────────────────────────────
+// Rollback UI removed from here (owner decision 2026-08-09) -- self-
+// service undo of a fin d'année promotion was judged too risky to leave
+// exposed in the interface (a full wipe of the new academic year, even
+// within the 14-day window). The backend route itself is untouched, so
+// support can still perform one directly if a school genuinely needs it;
+// hiding it here is what actually prevents an accidental click.
 function Etape5History() {
   const [runs, setRuns] = useState([])
   const [loading, setLoading] = useState(true)
-  const [rollbackTarget, setRollbackTarget] = useState(null)
-  const [rollingBack, setRollingBack] = useState(false)
-  const [error, setError] = useState('')
 
   function load() {
     setLoading(true)
@@ -695,21 +698,6 @@ function Etape5History() {
   }
 
   useEffect(() => { load() }, [])
-
-  async function handleRollback() {
-    setRollingBack(true)
-    setError('')
-    try {
-      await api.post(`/api/promotion/rollback/${rollbackTarget}`)
-      setRollbackTarget(null)
-      load()
-    } catch (err) {
-      setError(err.response?.data?.message || err.friendlyMessage || 'Erreur')
-    }
-    setRollingBack(false)
-  }
-
-  const withinWindow = run => (Date.now() - new Date(run.executed_at).getTime()) < 14 * 24 * 60 * 60 * 1000
 
   if (loading) return <div className="bg-white rounded-xl border border-steel-200 p-6"><p className="text-sm text-steel-400">Chargement...</p></div>
 
@@ -726,26 +714,8 @@ function Etape5History() {
               {run.is_rolled_back && <span className="text-red-500"> · Annulée</span>}
             </p>
           </div>
-          {!run.is_rolled_back && withinWindow(run) && (
-            <button onClick={() => setRollbackTarget(run.promotion_uid)} className="text-xs text-red-500 hover:underline">Annuler</button>
-          )}
         </div>
       ))}
-
-      {error && <p className="text-sm text-red-500">{error}</p>}
-
-      {rollbackTarget && (
-        <ConfirmModal
-          title="Annuler cette promotion ?"
-          message="La nouvelle année académique sera entièrement supprimée (classes, inscriptions, notes, paiements, tout ce qui y a été ajouté). L'année académique précédente redevient active. Cette action est irréversible."
-          danger
-          confirmLabel="Annuler la promotion"
-          saving={rollingBack}
-          savingLabel="Annulation..."
-          onCancel={() => setRollbackTarget(null)}
-          onConfirm={handleRollback}
-        />
-      )}
     </div>
   )
 }
