@@ -156,26 +156,24 @@ router.get('/status', (req, res) => {
 
   const currentYearId = db.prepare("SELECT value FROM app_settings WHERE key = 'current_academic_year_id'").get()?.value
   const currentYearRow = currentYearId
-    ? db.prepare('SELECT label FROM academic_years WHERE id = ?').get(currentYearId)
+    ? db.prepare('SELECT label, start_date FROM academic_years WHERE id = ?').get(currentYearId)
     : null
   const academicYearLabel = currentYearRow?.label || null
 
-  // Fixed calendar date, the same for every school every year -- NOT the
-  // school's own configured academic year end_date, and NOT tied to
-  // whenever the license happens to get renewed/activated (owner decision
-  // 2026-08-09, superseding the 2026-07-13 end_date-based rule, which let
-  // the countdown drift per-school depending on what they'd entered as
-  // their year's end date). The banner counts down to August 1st and
-  // flips to "available" that day, full stop.
-  const promotionAvailableDate = `${now.getFullYear()}-08-01`
-
-  // Once this school has actually run the promotion out of the current
-  // year, the banner should stop offering it again this cycle -- it
-  // naturally resets the following year once current_academic_year_id
-  // moves on to the new year.
-  const promotionAlreadyDone = currentYearId
-    ? !!db.prepare('SELECT 1 FROM promotion_runs WHERE academic_year_from = ? AND is_rolled_back = 0 LIMIT 1').get(currentYearId)
-    : false
+  // Derived from the CURRENT academic year's own start date -- one year
+  // after it started, at August 1st -- not just "August 1st of whatever
+  // calendar year it happens to be right now" (owner decision 2026-08-10,
+  // superseding the 2026-08-09 fixed-calendar-date rule). That earlier
+  // version re-armed the banner the instant you finished a promotion:
+  // today's real calendar date is still past Aug 1 regardless, and it had
+  // no way to know a promotion had just happened. Deriving from the
+  // current year's own start date fixes that with no separate "already
+  // done" flag needed at all -- the moment a promotion moves
+  // current_academic_year_id to the new year, this recalculates to a
+  // threshold a full year away, so the banner simply has nothing to show
+  // until it's actually relevant again.
+  const startYear = currentYearRow?.start_date ? new Date(currentYearRow.start_date).getFullYear() : now.getFullYear()
+  const promotionAvailableDate = `${startYear + 1}-08-01`
 
   // Live student count -- scoped to students actually enrolled THIS year,
   // matching the dashboard (owner report 2026-07-13: subscription page
@@ -207,7 +205,6 @@ router.get('/status', (req, res) => {
     reactivation_needed: reactivationNeeded,
     academic_year_label: academicYearLabel,
     promotion_available_date: promotionAvailableDate,
-    promotion_already_done: promotionAlreadyDone,
     configured: config?.is_configured === 1,
     has_users: userCount > 0,
     license_status: licenseStatus,

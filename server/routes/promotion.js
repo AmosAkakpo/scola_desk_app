@@ -258,17 +258,21 @@ router.post('/execute/:academicYearId', (req, res) => {
   const oldYearId = parseInt(req.params.academicYearId)
   const { overrides, carry_forward_assignments, new_year_label, confirm_text } = req.body || {}
 
-  // Promotion only opens from August 1st onward -- a fixed calendar date,
-  // the same for every school every year, matching the Aug 1 -> Jul 31
-  // year convention (owner decision 2026-08-09, correcting the previous
-  // rule which checked the school's own configured academic_years.end_date
-  // instead -- that column is admin-editable per school, so it could (and
-  // did) drift away from the real Aug 1 cutoff the Étape 1 banner already
-  // promises. This is the actual enforcement; the banner is only display,
-  // so the two must use the exact same rule -- see /api/activation/status
-  // for the matching promotion_available_date computation).
+  // Promotion only opens one year after the year being promoted FROM
+  // itself started, at August 1st -- NOT just "today's calendar date is
+  // past August 1st" (owner decision 2026-08-10, correcting the previous
+  // rule). That earlier version had no memory of what had already been
+  // promoted: the instant a school finished a promotion and moved into
+  // the new year, this same check would still pass (today is still past
+  // Aug 1 of the current calendar year) and silently allow promoting
+  // AGAIN out of the brand-new year, a year early. Deriving from the
+  // source year's own start_date fixes that -- must match the banner's
+  // computation in /api/activation/status exactly, since the banner is
+  // only display and this is the actual enforcement.
+  const oldYear = db.prepare('SELECT start_date FROM academic_years WHERE id = ?').get(oldYearId)
+  const startYear = oldYear?.start_date ? new Date(oldYear.start_date).getFullYear() : new Date().getFullYear()
   const now = new Date()
-  const threshold = new Date(`${now.getFullYear()}-08-01T00:00:00`)
+  const threshold = new Date(`${startYear + 1}-08-01T00:00:00`)
   if (now < threshold) {
     return res.status(400).json({
       error: 'PROMOTION_LOCKED',
