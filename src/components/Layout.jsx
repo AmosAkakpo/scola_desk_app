@@ -346,9 +346,9 @@ export default function Layout({ schoolInfo }) {
   })).filter(group => group.items.length > 0)
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden print:h-auto print:overflow-visible">
       {/* Sidebar */}
-      <aside className="w-56 bg-steel-800 flex flex-col shrink-0">
+      <aside className="w-56 bg-steel-800 flex flex-col shrink-0 print:hidden">
         <div className="p-4 border-b border-steel-700">
           <div className="flex items-center gap-2.5">
             <img src="/favicon-32x32.png" alt="ScolaDesk" className="w-9 h-9 rounded-xl" />
@@ -447,7 +447,7 @@ export default function Layout({ schoolInfo }) {
       )}
 
       {/* Main */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden print:overflow-visible print:h-auto">
         {/* Read-only banner — persistent, no dismiss. Covers two distinct
             server-side triggers (requireActiveLicense.js) that both mean
             the same thing to the user: writes are blocked until a key is
@@ -455,7 +455,7 @@ export default function Layout({ schoolInfo }) {
             renewal doesn't show both "new key issued" AND "read-only"
             with different wording for the same lockout. */}
         {(schoolInfo?.license_status === 'expired' || schoolInfo?.reactivation_needed) && (
-          <div className="flex items-center justify-between px-4 py-2 bg-red-600 text-white text-sm shrink-0">
+          <div className="flex items-center justify-between px-4 py-2 bg-red-600 text-white text-sm shrink-0 print:hidden">
             <span className="font-medium">
               {schoolInfo?.license_status === 'expired'
                 ? 'Licence expirée — mode lecture seule. Les ajouts et modifications sont désactivés.'
@@ -470,13 +470,13 @@ export default function Layout({ schoolInfo }) {
         )}
 
         {/* License-expiry advance warning, admin-only, dismissible */}
-        {user?.role === 'admin' && <LicenseExpiryBanner expiry={schoolInfo?.expiry} />}
+        {user?.role === 'admin' && <div className="print:hidden"><LicenseExpiryBanner expiry={schoolInfo?.expiry} /></div>}
 
         {/* Promotion countdown/redirect banner, admin-only, dismissible */}
-        {user?.role === 'admin' && <PromotionBanner thresholdDate={schoolInfo?.promotion_available_date} alreadyDone={schoolInfo?.promotion_already_done} />}
+        {user?.role === 'admin' && <div className="print:hidden"><PromotionBanner thresholdDate={schoolInfo?.promotion_available_date} alreadyDone={schoolInfo?.promotion_already_done} /></div>}
 
         {/* Top bar */}
-        <header className="h-12 bg-white border-b border-steel-200 flex items-center justify-between px-6 shrink-0">
+        <header className="h-12 bg-white border-b border-steel-200 flex items-center justify-between px-6 shrink-0 print:hidden">
           <div className="flex items-center gap-3">
             <span className="text-sm text-steel-800 font-semibold">{schoolInfo?.school_name || ''}</span>
             {schoolInfo?.academic_year_label && (
@@ -509,7 +509,7 @@ export default function Layout({ schoolInfo }) {
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-6 bg-steel-50">
+        <main className="flex-1 overflow-y-auto p-6 bg-steel-50 print:overflow-visible print:h-auto print:p-0 print:bg-white">
           <Outlet />
         </main>
       </div>

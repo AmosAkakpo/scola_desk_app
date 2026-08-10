@@ -66,6 +66,12 @@ export default function TeacherSalaryPage() {
   // Print
   const [printData, setPrintData] = useState(null)
 
+  // No visibility/position CSS trick here -- that combination (body *
+  // { visibility: hidden } plus position: fixed/absolute on the print
+  // target) was corrupting the printed PDF output on this Electron/
+  // Chromium build ("Failed to load PDF document", owner report
+  // 2026-08-09). The modal's own on-screen-only chrome is neutralized
+  // with print: classes below instead.
   useEffect(() => {
     if (!printData) return
     const style = document.createElement('style')
@@ -73,7 +79,7 @@ export default function TeacherSalaryPage() {
     // Salary slip is short -- printed normal A4 portrait but capped to
     // roughly the top half (see SalaryReceipt's height below), leaving the
     // bottom half blank so the same sheet can go through the printer again.
-    style.textContent = '@media print { @page { size: A4 portrait; margin: 8mm; } body * { visibility: hidden !important; } #scola-print-content { visibility: visible !important; position: fixed !important; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; } #scola-print-content * { visibility: visible !important; } }'
+    style.textContent = '@media print { @page { size: A4 portrait; margin: 8mm; } }'
     document.head.appendChild(style)
     return () => { document.getElementById('scola-print-style')?.remove() }
   }, [printData])
@@ -329,14 +335,14 @@ export default function TeacherSalaryPage() {
 
       {/* Print modal */}
       {printData && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:static print:block print:bg-white print:p-0"
           onClick={() => setPrintData(null)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl flex flex-col max-h-[90vh]"
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl flex flex-col max-h-[90vh] print:max-h-none print:shadow-none print:rounded-none print:w-auto print:max-w-none print:block"
             onClick={e => e.stopPropagation()}>
-            <div id="scola-print-content" className="overflow-auto flex-1">
+            <div className="overflow-auto flex-1 print:overflow-visible">
               <SalaryReceipt data={printData} />
             </div>
-            <div className="flex gap-2 p-4 border-t border-steel-200 shrink-0">
+            <div className="flex gap-2 p-4 border-t border-steel-200 shrink-0 print:hidden">
               <button onClick={() => window.print()}
                 className="flex-1 px-3 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors">
                 Imprimer

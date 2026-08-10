@@ -7,6 +7,16 @@ function formatXOF(n) {
   return new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' F'
 }
 
+// PDF-only formatter -- Intl.NumberFormat('fr-FR') inserts a "narrow
+// no-break space" (U+202F) between digit groups, which jsPDF's built-in
+// font has no glyph for and rendered as a stray "/" (owner report
+// 2026-08-10, same bug as UnpaidReportPage.jsx). A plain ASCII space
+// sidesteps the font entirely.
+function formatXOFPdf(n) {
+  if (n === null || n === undefined) return '-'
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' F'
+}
+
 function formatDate(d) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('fr-FR')
@@ -60,7 +70,7 @@ export default function FinanceReportPage() {
   const [yearLabel, setYearLabel] = useState('')
   const [school, setSchool] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [printing, setPrinting] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [yearId, setYearId] = useState(null) // null = current year
   const [expanded, setExpanded] = useState({}) // month -> true
 
@@ -96,29 +106,147 @@ export default function FinanceReportPage() {
     })
   }
 
-  // Print only the report block (same pattern as receipt pages)
-  useEffect(() => {
-    if (!printing) return
-    const style = document.createElement('style')
-    style.id = 'scola-print-style'
-    style.textContent = '@media print { @page { size: A4 portrait; margin: 0; } body * { visibility: hidden !important; } #scola-print-content { visibility: visible !important; position: fixed !important; top: 0; left: 0; width: 100%; overflow: visible; } #scola-print-content * { visibility: visible !important; } }'
-    document.head.appendChild(style)
-    window.print()
-    const cleanup = () => { document.getElementById('scola-print-style')?.remove(); setPrinting(false) }
-    // afterprint may not fire in all webviews — also cleanup on next tick focus
-    window.addEventListener('afterprint', cleanup, { once: true })
-    return () => { document.getElementById('scola-print-style')?.remove() }
-  }, [printing])
-
-  if (loading) return <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" /></div>
-  if (!months) return <p className="text-steel-400 text-sm text-center py-12">Erreur de chargement</p>
-
   const linesByMonth = {}
   for (const l of lines) (linesByMonth[l.month] ||= []).push(l)
 
-  const grandEntrant = months.reduce((s, m) => s + m.entrant, 0)
-  const grandSortant = months.reduce((s, m) => s + m.sortant, 0)
+  const grandEntrant = (months || []).reduce((s, m) => s + m.entrant, 0)
+  const grandSortant = (months || []).reduce((s, m) => s + m.sortant, 0)
   const restant = grandEntrant - grandSortant
+
+  // Built directly with jsPDF instead of window.print()/print-to-PDF --
+  // that route was corrupting the output on this Electron/Chromium build
+  // ("Failed to load PDF document", owner report 2026-08-09). Same
+  // approach as UnpaidReportPage.jsx: draw text/lines directly, track a y
+  // cursor, addPage() manually. Every month's full breakdown is always
+  // included, not just whatever was expanded on screen (owner request
+  // 2026-07-26).
+  async function downloadPdf() {
+    if (!months) return
+    setGenerating(true)
+    try {
+      const { jsPDF } = await import('jspdf')
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      const W = 210
+      const H = 297
+      const MARGIN = 18
+      const BOTTOM = H - 18
+      const printedAt = new Date()
+
+      function drawDocHeader() {
+        doc.setFontSize(16)
+        doc.setFont(undefined, 'bold')
+        doc.setTextColor(0)
+        doc.text(school?.school_name || 'Établissement scolaire', W / 2, 20, { align: 'center' })
+        if (school?.city || school?.country) {
+          doc.setFontSize(10)
+          doc.setFont(undefined, 'normal')
+          doc.setTextColor(100)
+          doc.text([school.city, school.country].filter(Boolean).join(' — '), W / 2, 26, { align: 'center' })
+        }
+        doc.setFontSize(12)
+        doc.setFont(undefined, 'bold')
+        doc.setTextColor(0)
+        doc.text(`RAPPORT FINANCIER — ${yearLabel || ''}`, W / 2, 33, { align: 'center' })
+        doc.setFontSize(8.5)
+        doc.setFont(undefined, 'normal')
+        doc.setTextColor(130)
+        doc.text(`Édité le ${printedAt.toLocaleDateString('fr-FR')}`, W / 2, 38, { align: 'center' })
+        doc.setTextColor(0)
+        doc.setDrawColor(0)
+        doc.line(MARGIN, 41, W - MARGIN, 41)
+      }
+
+      drawDocHeader()
+      let y = 49
+
+      function ensureSpace(needed) {
+        if (y + needed > BOTTOM) {
+          doc.addPage()
+          y = MARGIN
+        }
+      }
+
+      months.forEach(m => {
+        ensureSpace(16)
+        doc.setFontSize(11)
+        doc.setFont(undefined, 'bold')
+        doc.setTextColor(0)
+        doc.text(monthLabel(m.month), MARGIN, y)
+        doc.setFontSize(9.5)
+        doc.text(m.entrant > 0 ? formatXOFPdf(m.entrant) : '-', W - MARGIN - 30, y, { align: 'right' })
+        doc.setTextColor(5, 150, 105)
+        doc.text('Entrant:', W - MARGIN - 55, y, { align: 'left' })
+        doc.setTextColor(0)
+        doc.text(m.sortant > 0 ? formatXOFPdf(m.sortant) : '-', W - MARGIN, y, { align: 'right' })
+        doc.setTextColor(220, 38, 38)
+        doc.text('Sortant:', W - MARGIN - 30 - 22, y, { align: 'left' })
+        doc.setTextColor(0)
+        y += 5
+
+        const monthLines = linesByMonth[m.month] || []
+        if (monthLines.length === 0) {
+          doc.setFontSize(8)
+          doc.setFont(undefined, 'italic')
+          doc.setTextColor(150)
+          doc.text('Aucun mouvement ce mois', MARGIN + 2, y)
+          doc.setTextColor(0)
+          y += 6
+        } else {
+          doc.setFontSize(8)
+          doc.setFont(undefined, 'bold')
+          doc.setTextColor(120)
+          doc.text('Type', MARGIN + 2, y)
+          doc.text('Catégorie', MARGIN + 22, y)
+          doc.text('Description', MARGIN + 62, y)
+          doc.text('Date', MARGIN + 122, y)
+          doc.text('Montant', W - MARGIN, y, { align: 'right' })
+          doc.setTextColor(0)
+          y += 4.5
+          doc.setFont(undefined, 'normal')
+          monthLines.forEach(l => {
+            ensureSpace(4.5)
+            doc.setTextColor(...(l.flow === 'entrant' ? [5, 150, 105] : [220, 38, 38]))
+            doc.text(l.flow === 'entrant' ? 'Entrant' : 'Sortant', MARGIN + 2, y)
+            doc.setTextColor(0)
+            doc.text(String(l.category || ''), MARGIN + 22, y)
+            doc.text(String(l.description || '—').slice(0, 32), MARGIN + 62, y)
+            doc.text(formatDate(l.date), MARGIN + 122, y)
+            doc.text(formatXOFPdf(l.amount), W - MARGIN, y, { align: 'right' })
+            y += 4.5
+          })
+        }
+        y += 4
+      })
+
+      ensureSpace(20)
+      doc.setDrawColor(0)
+      doc.line(MARGIN, y, W - MARGIN, y)
+      y += 6
+      doc.setFontSize(10)
+      doc.setFont(undefined, 'bold')
+      doc.text('TOTAL', MARGIN, y)
+      doc.setTextColor(5, 150, 105)
+      doc.text(formatXOFPdf(grandEntrant), W - MARGIN - 30, y, { align: 'right' })
+      doc.setTextColor(220, 38, 38)
+      doc.text(formatXOFPdf(grandSortant), W - MARGIN, y, { align: 'right' })
+      doc.setTextColor(0)
+      y += 7
+      doc.setFontSize(11)
+      doc.text('RESTANT', MARGIN, y)
+      doc.setTextColor(...(restant >= 0 ? [5, 150, 105] : [220, 38, 38]))
+      doc.text(formatXOFPdf(restant), W - MARGIN, y, { align: 'right' })
+      doc.setTextColor(0)
+
+      const yearSlug = (yearLabel || 'annee').replace(/[^a-z0-9]/gi, '_')
+      doc.save(`Rapport_financier_${yearSlug}.pdf`)
+    } catch (err) {
+      console.error('PDF generation error', err)
+    }
+    setGenerating(false)
+  }
+
+  if (loading) return <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin" /></div>
+  if (!months) return <p className="text-steel-400 text-sm text-center py-12">Erreur de chargement</p>
 
   return (
     <div className="max-w-4xl">
@@ -129,27 +257,15 @@ export default function FinanceReportPage() {
         </div>
         <div className="flex items-center gap-3">
           <YearSwitcher yearId={yearId} onChange={setYearId} />
-          <button onClick={() => setPrinting(true)}
-            className="px-4 py-2 bg-brand hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-            Imprimer
+          <button onClick={downloadPdf} disabled={generating}
+            className="px-4 py-2 bg-brand hover:bg-brand-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
+            {generating ? 'Génération...' : 'Télécharger PDF'}
           </button>
         </div>
       </div>
 
-      <div id="scola-print-content" className="bg-white rounded-xl border border-steel-200 overflow-hidden" style={printing ? { padding: '12mm 16mm', fontFamily: 'Arial, sans-serif' } : {}}>
-        {/* Print-only header */}
-        {printing && (
-          <div style={{ textAlign: 'center', borderBottom: '2px solid #000', paddingBottom: 10, marginBottom: 16 }}>
-            <p style={{ fontWeight: 'bold', fontSize: 18, margin: '0 0 3px' }}>{school?.school_name || 'Établissement scolaire'}</p>
-            {(school?.city || school?.country) && (
-              <p style={{ fontSize: 11, margin: 0, color: '#555' }}>{[school.city, school.country].filter(Boolean).join(' — ')}</p>
-            )}
-            <p style={{ fontWeight: 'bold', fontSize: 14, letterSpacing: 2, margin: '12px 0 0', textTransform: 'uppercase' }}>Rapport financier — {yearLabel}</p>
-            <p style={{ fontSize: 10, color: '#888', margin: '4px 0 0' }}>Édité le {new Date().toLocaleDateString('fr-FR')}</p>
-          </div>
-        )}
-
+      <div className="bg-white rounded-xl border border-steel-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-steel-200 bg-steel-50">
@@ -160,13 +276,13 @@ export default function FinanceReportPage() {
           </thead>
           <tbody>
             {months.map(m => {
-              const isOpen = !!expanded[m.month] || printing
+              const isOpen = !!expanded[m.month]
               const monthLines = linesByMonth[m.month] || []
               return (
                 <Fragment key={m.month}>
-                  <tr className="border-b border-steel-50 hover:bg-steel-50/60 cursor-pointer print:hover:bg-transparent" onClick={() => toggleMonth(m.month)}>
+                  <tr className="border-b border-steel-50 hover:bg-steel-50/60 cursor-pointer" onClick={() => toggleMonth(m.month)}>
                     <td className="px-4 py-2.5 text-steel-800 font-medium flex items-center gap-1.5">
-                      <svg className={`w-3 h-3 text-steel-400 transition-transform print:hidden ${isOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className={`w-3 h-3 text-steel-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                       </svg>
                       {monthLabel(m.month)}
